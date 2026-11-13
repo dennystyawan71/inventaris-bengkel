@@ -1265,18 +1265,62 @@
             return Array.from(arr).map(b => b.toString(16).padStart(2, '0')).join('');
         }
 
+        // Penentu Level Akses Ketat: Hanya 'PLP' dan 'GURU' yang diizinkan, selain itu ditolak
+        function resolveAccountRoleLevel(account) {
+            if (!account) return 'UNAUTHORIZED';
+            if (account.roleType === 'PLP' || account.roleType === 'GURU') {
+                return account.roleType;
+            }
+            const uname = (account.username || '').toLowerCase();
+            const rtext = (account.role || '').toLowerCase();
+            if (uname === 'plp_budi' || rtext.includes('plp')) return 'PLP';
+            if (uname === 'guru_hendra' || rtext.includes('guru')) return 'GURU';
+            return 'UNAUTHORIZED';
+        }
+
+        function redirectToPortalGuru() {
+            try {
+                if (window.location.protocol === 'blob:') {
+                    showToast('Akun Guru terverifikasi! Buka file portal-guru.html untuk masuk ke halaman Guru.');
+                    return;
+                }
+                window.location.replace('portal-guru.html');
+            } catch (err) {
+                window.location.href = 'portal-guru.html';
+            }
+        }
+
         async function initAuthAccounts() {
-            if (!localStorage.getItem(KEY_AUTH_ACCOUNTS)) {
+            const rawExisting = localStorage.getItem(KEY_AUTH_ACCOUNTS);
+            if (!rawExisting) {
                 const salt1 = generateRandomHex(16);
                 const salt2 = generateRandomHex(16);
                 const hash1 = await computeSaltedSha256('123456', salt1);
                 const hash2 = await computeSaltedSha256('guru2026', salt2);
 
                 const defaultAccounts = [
-                    { username: 'plp_budi', name: 'Budi Santoso, S.T.', role: 'Petugas PLP Bengkel TI', salt: salt1, hash: hash1 },
-                    { username: 'guru_hendra', name: 'Hendra Wijaya, S.Kom', role: 'Guru Produktif TI', salt: salt2, hash: hash2 }
+                    { username: 'plp_budi', name: 'Budi Santoso, S.T.', role: 'Petugas PLP Bengkel TI', roleType: 'PLP', salt: salt1, hash: hash1 },
+                    { username: 'guru_hendra', name: 'Hendra Wijaya, S.Kom', role: 'Guru Produktif TI', roleType: 'GURU', salt: salt2, hash: hash2 }
                 ];
                 localStorage.setItem(KEY_AUTH_ACCOUNTS, JSON.stringify(defaultAccounts));
+            } else {
+                // Pastikan akun tersimpan memiliki atribut roleType eksplisit ('PLP' / 'GURU')
+                try {
+                    const parsed = JSON.parse(rawExisting);
+                    if (Array.isArray(parsed)) {
+                        let changed = false;
+                        parsed.forEach(acc => {
+                            const resolved = resolveAccountRoleLevel(acc);
+                            if (acc.roleType !== resolved) {
+                                acc.roleType = resolved;
+                                changed = true;
+                            }
+                        });
+                        if (changed) {
+                            localStorage.setItem(KEY_AUTH_ACCOUNTS, JSON.stringify(parsed));
+                        }
+                    }
+                } catch (e) {}
             }
         }
 
@@ -1289,10 +1333,50 @@
                     sessionStorage.removeItem(KEY_SESSION);
                     return null;
                 }
+                const level = resolveAccountRoleLevel(session);
+                if (level !== 'PLP' && level !== 'GURU') {
+                    sessionStorage.removeItem(KEY_SESSION);
+                    return null;
+                }
+                session.roleType = level;
                 return session;
             } catch (e) {
+                sessionStorage.removeItem(KEY_SESSION);
                 return null;
             }
+        }
+
+        // Penjaga Rute Khusus Halaman PLP (index.html): Guru & Role Lain Ditolak Keras
+        function enforcePlpLevelGuard() {
+            const session = getActiveSession();
+            const appWrap = document.getElementById('app-wrapper');
+            const loginScr = document.getElementById('login-screen');
+
+            if (!session) {
+                if (appWrap) appWrap.classList.add('hidden');
+                if (loginScr) loginScr.classList.remove('hidden');
+                return false;
+            }
+
+            const level = resolveAccountRoleLevel(session);
+
+            if (level === 'GURU') {
+                if (appWrap) appWrap.classList.add('hidden');
+                if (loginScr) loginScr.classList.remove('hidden');
+                showToast('Akses ditolak! Akun Guru tidak boleh membuka halaman PLP. Mengalihkan ke portal-guru.html...', 'error');
+                setTimeout(() => redirectToPortalGuru(), 400);
+                return false;
+            }
+
+            if (level !== 'PLP') {
+                sessionStorage.removeItem(KEY_SESSION);
+                if (appWrap) appWrap.classList.add('hidden');
+                if (loginScr) loginScr.classList.remove('hidden');
+                showToast('Akses ditolak! Level akun tidak memiliki izin masuk.', 'error');
+                return false;
+            }
+
+            return true;
         }
 
         function fillDemoLogin(user, pass) {
@@ -1366,6 +1450,14 @@
                 return;
             }
 
+            // Validasi Level Akun: Hanya PLP dan GURU yang diizinkan, selain itu tolak semua!
+            const level = resolveAccountRoleLevel(account);
+            if (level !== 'PLP' && level !== 'GURU') {
+                sessionStorage.removeItem(KEY_SESSION);
+                showToast('Akses ditolak! Hanya akun level PLP atau Guru yang diizinkan masuk.', 'error');
+                return;
+            }
+
             // Reset guard & buat Session Token terenkripsi di sessionStorage
             localStorage.removeItem(KEY_AUTH_GUARD);
             const sessionPayload = {
@@ -1373,16 +1465,39 @@
                 username: account.username,
                 name: account.name,
                 role: account.role,
+                roleType: level,
                 loginAt: new Date().toISOString(),
                 expiresAt: Date.now() + (60 * 60 * 1000) // 60 Menit
             };
             sessionStorage.setItem(KEY_SESSION, JSON.stringify(sessionPayload));
             document.getElementById('login-password').value = '';
-            enterAuthenticatedApp(sessionPayload);
-            showToast(`Selamat datang, ${account.name}!`);
+
+            // Routing Berdasarkan Level Akun:
+            // - GURU -> arahkan ke portal-guru.html (tidak boleh masuk index.html)
+            // - PLP  -> masuk ke index.html (Panel PLP)
+            if (level === 'GURU') {
+                showToast(`Login Guru berhasil (${account.name}). Mengalihkan ke portal-guru.html...`);
+                setTimeout(() => redirectToPortalGuru(), 450);
+                return;
+            }
+
+            if (level === 'PLP') {
+                const pathName = window.location.pathname || '';
+                if (pathName && !pathName.endsWith('/') && !pathName.endsWith('index.html') && window.location.protocol !== 'blob:') {
+                    window.location.replace('index.html');
+                    return;
+                }
+                enterAuthenticatedApp(sessionPayload);
+                showToast(`Selamat datang, ${account.name}! (Akses Level PLP)`);
+            }
         }
 
         function enterAuthenticatedApp(session) {
+            // Proteksi keras: Tolak jika bukan level PLP
+            if (!session || resolveAccountRoleLevel(session) !== 'PLP') {
+                enforcePlpLevelGuard();
+                return;
+            }
             document.getElementById('login-screen').classList.add('hidden');
             document.getElementById('app-wrapper').classList.remove('hidden');
             document.getElementById('active-officer-badge').textContent = `${session.role}: ${session.name}`;
@@ -3003,14 +3118,24 @@
             }, 3400);
         }
 
-        // Boot Aplikasi dengan Cek Keamanan Sesi Login Terlebih Dahulu
+        // Proteksi anti-bypass saat tombol Back browser (bfcache) ditekan
+        window.addEventListener('pageshow', function() {
+            const activeSession = getActiveSession();
+            if (activeSession) {
+                enforcePlpLevelGuard();
+            }
+        });
+
+        // Boot Aplikasi dengan Cek Keamanan Sesi Login & Level Akses Terlebih Dahulu
         window.onload = async function() {
             try {
                 await initAuthAccounts();
                 checkLoginLockoutStatus();
                 const activeSession = getActiveSession();
                 if (activeSession) {
-                    enterAuthenticatedApp(activeSession);
+                    if (enforcePlpLevelGuard()) {
+                        enterAuthenticatedApp(activeSession);
+                    }
                 } else {
                     lucide.createIcons();
                 }

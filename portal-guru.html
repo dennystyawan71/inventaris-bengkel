@@ -23,6 +23,7 @@
         }
     </script>
     <style>
+        html.auth-checking body { display: none !important; }
         .no-scrollbar::-webkit-scrollbar { display: none; }
         .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
         .pb-safe { padding-bottom: env(safe-area-inset-bottom, 0px); }
@@ -37,8 +38,121 @@
             }
         }
     </style>
+    <!-- ===================================================================== -->
+    <!-- IMMEDIATE AUTH & ROLE GUARD (MENCEGAH AKSES LANGSUNG TANPA LOGIN)     -->
+    <!-- ===================================================================== -->
+    <script>
+        (function() {
+            const KEY_SESSION = 'sipakat_active_session_v1';
+            const KEY_SHARED_SESSION = 'sipakat_shared_auth_session_v1';
+
+            function isBlobEnv() {
+                return window.location.protocol === 'blob:' || window.location.href.startsWith('blob:');
+            }
+
+            function redirectToLogin(reason) {
+                try {
+                    sessionStorage.removeItem(KEY_SESSION);
+                    localStorage.removeItem(KEY_SHARED_SESSION);
+                } catch (e) {}
+
+                if (!isBlobEnv()) {
+                    try {
+                        const target = new URL('index.html?auth_error=' + encodeURIComponent(reason), window.location.href).href;
+                        window.location.replace(target);
+                        return;
+                    } catch (err) {}
+                }
+                document.documentElement.classList.remove('auth-checking');
+                window.addEventListener('DOMContentLoaded', function() {
+                    const lockOverlay = document.getElementById('auth-lock-overlay');
+                    if (lockOverlay) lockOverlay.classList.remove('hidden');
+                });
+            }
+
+            window.verifyGuruSessionGuard = function() {
+                document.documentElement.classList.add('auth-checking');
+                try {
+                    const raw = sessionStorage.getItem(KEY_SESSION) || localStorage.getItem(KEY_SHARED_SESSION);
+                    if (!raw) {
+                        redirectToLogin('login_required');
+                        return null;
+                    }
+                    const session = JSON.parse(raw);
+                    if (!session || !session.token || !session.roleType || Date.now() > session.expiresAt) {
+                        redirectToLogin('login_required');
+                        return null;
+                    }
+                    if (session.roleType !== 'GURU') {
+                        redirectToLogin('forbidden_plp_to_guru');
+                        return null;
+                    }
+                    sessionStorage.setItem(KEY_SESSION, JSON.stringify(session));
+                    document.documentElement.classList.remove('auth-checking');
+                    return session;
+                } catch (e) {
+                    redirectToLogin('login_required');
+                    return null;
+                }
+            };
+
+            // Jalankan pengecekan segera sebelum konten halaman dirender
+            window.verifyGuruSessionGuard();
+
+            // Cegah akses lewat tombol Back browser (bfcache) setelah logout
+            window.addEventListener('pageshow', function() {
+                window.verifyGuruSessionGuard();
+            });
+        })();
+    </script>
 </head>
 <body class="min-h-full font-sans text-slate-800 antialiased flex flex-col justify-between overflow-x-hidden">
+
+    <!-- ===================================================================== -->
+    <!-- OVERLAY KUNCI AKSES (FALLBACK JIKA SESI TIDAK VALID / MODE PREVIEW)   -->
+    <!-- ===================================================================== -->
+    <div id="auth-lock-overlay" class="fixed inset-0 bg-slate-900/95 backdrop-blur-md z-50 flex items-center justify-center p-4 hidden">
+        <div class="bg-white rounded-2xl max-w-sm w-full p-6 shadow-2xl border border-slate-200 text-center space-y-4">
+            <div class="w-12 h-12 rounded-2xl bg-amber-50 text-amber-600 flex items-center justify-center mx-auto">
+                <i data-lucide="lock" class="w-6 h-6"></i>
+            </div>
+            <div class="space-y-1">
+                <h3 class="text-base font-extrabold text-slate-900">Akses Portal Guru Terkunci</h3>
+                <p class="text-xs text-slate-500 leading-relaxed">
+                    Anda belum login atau sesi telah berakhir. Silakan masuk terlebih dahulu menggunakan akun <strong>Guru</strong> pada halaman login awal.
+                </p>
+            </div>
+            <div class="pt-1">
+                <a href="index.html?auth_error=login_required" onclick="handleManualLoginRedirect(event)" class="w-full min-h-[42px] px-4 py-2.5 bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs rounded-xl shadow inline-flex items-center justify-center space-x-2 transition">
+                    <i data-lucide="log-in" class="w-4 h-4"></i>
+                    <span>Ke Halaman Login Awal (index.html)</span>
+                </a>
+            </div>
+        </div>
+    </div>
+
+    <!-- ===================================================================== -->
+    <!-- OVERLAY STATUS LOGOUT (TAMPIL SAAT PROSES KELUAR / MODE PREVIEW)      -->
+    <!-- ===================================================================== -->
+    <div id="logout-redirect-overlay" class="fixed inset-0 bg-slate-900/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden">
+        <div class="bg-white rounded-2xl max-w-sm w-full p-6 shadow-2xl border border-slate-200 text-center space-y-4">
+            <div class="w-12 h-12 rounded-2xl bg-rose-50 text-rose-600 flex items-center justify-center mx-auto">
+                <i data-lucide="log-out" class="w-6 h-6"></i>
+            </div>
+            <div class="space-y-1">
+                <h3 class="text-base font-extrabold text-slate-900">Sesi Portal Guru Ditutup</h3>
+                <p id="logout-overlay-desc" class="text-xs text-slate-500 leading-relaxed">
+                    Mengalihkan kembali ke halaman login awal SIPAKAT...
+                </p>
+            </div>
+            <div class="pt-1">
+                <a href="index.html" onclick="handleManualLoginRedirect(event)" class="w-full min-h-[42px] px-4 py-2.5 bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs rounded-xl shadow inline-flex items-center justify-center space-x-2 transition">
+                    <i data-lucide="log-in" class="w-4 h-4"></i>
+                    <span>Kembali ke Halaman Login (index.html)</span>
+                </a>
+            </div>
+        </div>
+    </div>
 
     <!-- ===================================================================== -->
     <!-- TOP HEADER NAVBAR (PORTAL GURU & LIVE SYNC INDICATOR)                 -->
@@ -55,7 +169,7 @@
                         <span class="text-base sm:text-lg font-extrabold tracking-tight text-slate-900 leading-none">SIPAKAT</span>
                         <span class="px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-wider bg-teal-50 text-teal-700 border border-teal-200 rounded-md">Portal Guru</span>
                     </div>
-                    <span class="text-[10px] sm:text-[11px] text-slate-500 font-medium block mt-0.5">Cek Kesiapan Alat & Jadwal Praktikum</span>
+                    <span class="text-[10px] sm:text-[11px] text-slate-500 font-medium block mt-0.5">Cek Kesiapan Alat &amp; Jadwal Praktikum</span>
                 </div>
             </div>
 
@@ -70,20 +184,20 @@
                     <span id="last-sync-text">Live Sync Aktif</span>
                 </div>
 
-                <button onclick="manualSyncNow()" title="Segarkan Data Sekarang" class="min-h-[40px] px-3 py-2 text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 active:scale-[0.99] rounded-xl transition flex items-center space-x-1.5">
+                <button type="button" onclick="manualSyncNow()" title="Segarkan Data Sekarang" class="min-h-[40px] px-3 py-2 text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 active:scale-[0.99] rounded-xl transition flex items-center space-x-1.5">
                     <i id="sync-icon" data-lucide="refresh-cw" class="w-3.5 h-3.5 text-teal-600"></i>
                     <span class="hidden md:inline">Segarkan</span>
                 </button>
 
-                <button onclick="openModal('syncFileModal')" title="Sinkronisasi Manual via File JSON (Jika beda browser/perangkat)" class="min-h-[40px] px-3 py-2 text-xs font-bold text-teal-700 bg-teal-50 hover:bg-teal-100 border border-teal-200 rounded-xl transition flex items-center space-x-1.5">
+                <button type="button" onclick="openModal('syncFileModal')" title="Sinkronisasi Manual via File JSON (Jika beda browser/perangkat)" class="min-h-[40px] px-3 py-2 text-xs font-bold text-teal-700 bg-teal-50 hover:bg-teal-100 border border-teal-200 rounded-xl transition flex items-center space-x-1.5">
                     <i data-lucide="folder-sync" class="w-3.5 h-3.5"></i>
                     <span class="hidden md:inline">Sinkron JSON</span>
                 </button>
 
-                <a href="index.html" target="_blank" title="Buka Halaman Petugas PLP SIPAKAT" class="min-h-[40px] px-3 py-2 text-xs font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded-xl transition flex items-center space-x-1.5">
-                    <i data-lucide="external-link" class="w-3.5 h-3.5"></i>
-                    <span class="hidden sm:inline">Panel PLP</span>
-                </a>
+                <button type="button" onclick="logoutUser()" title="Keluar &amp; Kembali ke Halaman Login Awal" class="min-h-[40px] px-3 py-2 text-xs font-bold text-rose-600 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-xl transition flex items-center space-x-1.5 shrink-0">
+                    <i data-lucide="log-out" class="w-3.5 h-3.5"></i>
+                    <span>Keluar</span>
+                </button>
             </div>
         </div>
     </header>
@@ -105,18 +219,18 @@
                         <span>● Database Terhubung</span>
                     </span>
                 </div>
-                <h1 class="text-lg sm:text-2xl font-extrabold tracking-tight leading-snug">Pusat Informasi & Kesiapan Alat Praktikum</h1>
+                <h1 class="text-lg sm:text-2xl font-extrabold tracking-tight leading-snug">Pusat Informasi &amp; Kesiapan Alat Praktikum</h1>
                 <p id="hero-live-summary" class="text-teal-50/90 text-xs sm:text-sm leading-relaxed">
                     Memuat kondisi stok aktual Bengkel TI...
                 </p>
             </div>
 
             <div class="grid grid-cols-1 sm:grid-cols-2 lg:flex gap-2.5 w-full lg:w-auto shrink-0">
-                <button onclick="switchTab('simulator')" class="min-h-[44px] bg-white text-teal-800 font-bold px-4 py-2.5 rounded-xl text-xs sm:text-sm shadow-lg hover:bg-teal-50 active:scale-[0.99] transition flex items-center justify-center space-x-2">
+                <button type="button" onclick="switchTab('simulator')" class="min-h-[44px] bg-white text-teal-800 font-bold px-4 py-2.5 rounded-xl text-xs sm:text-sm shadow-lg hover:bg-teal-50 active:scale-[0.99] transition flex items-center justify-center space-x-2">
                     <i data-lucide="calculator" class="w-4 h-4 text-teal-600 shrink-0"></i>
                     <span>Simulasi Kebutuhan Alat</span>
                 </button>
-                <button onclick="openBookingModal()" class="min-h-[44px] bg-teal-950/45 hover:bg-teal-950/65 border border-white/25 text-white font-bold px-4 py-2.5 rounded-xl text-xs sm:text-sm active:scale-[0.99] transition flex items-center justify-center space-x-2">
+                <button type="button" onclick="openBookingModal()" class="min-h-[44px] bg-teal-950/45 hover:bg-teal-950/65 border border-white/25 text-white font-bold px-4 py-2.5 rounded-xl text-xs sm:text-sm active:scale-[0.99] transition flex items-center justify-center space-x-2">
                     <i data-lucide="calendar-plus" class="w-4 h-4 shrink-0"></i>
                     <span>+ Booking Praktikum</span>
                 </button>
@@ -180,22 +294,22 @@
 
         <!-- DESKTOP / TABLET NAVIGATION TABS -->
         <div class="hidden sm:flex border-b border-slate-200 mb-6 space-x-6 overflow-x-auto no-scrollbar">
-            <button onclick="switchTab('catalog')" id="tab-catalog" class="pb-3 text-sm font-bold border-b-2 border-teal-600 text-teal-700 whitespace-nowrap transition flex items-center space-x-2">
+            <button type="button" onclick="switchTab('catalog')" id="tab-catalog" class="pb-3 text-sm font-bold border-b-2 border-teal-600 text-teal-700 whitespace-nowrap transition flex items-center space-x-2">
                 <i data-lucide="layers" class="w-4 h-4"></i>
-                <span>Katalog & Detail Stok Alat</span>
+                <span>Katalog &amp; Detail Stok Alat</span>
             </button>
-            <button onclick="switchTab('simulator')" id="tab-simulator" class="pb-3 text-sm font-semibold border-b-2 border-transparent text-slate-500 hover:text-slate-900 whitespace-nowrap transition flex items-center space-x-2">
+            <button type="button" onclick="switchTab('simulator')" id="tab-simulator" class="pb-3 text-sm font-semibold border-b-2 border-transparent text-slate-500 hover:text-slate-900 whitespace-nowrap transition flex items-center space-x-2">
                 <i data-lucide="calculator" class="w-4 h-4"></i>
                 <span>Cek Kesiapan Paket Praktik</span>
             </button>
-            <button onclick="switchTab('schedules')" id="tab-schedules" class="pb-3 text-sm font-semibold border-b-2 border-transparent text-slate-500 hover:text-slate-900 whitespace-nowrap transition flex items-center space-x-2">
+            <button type="button" onclick="switchTab('schedules')" id="tab-schedules" class="pb-3 text-sm font-semibold border-b-2 border-transparent text-slate-500 hover:text-slate-900 whitespace-nowrap transition flex items-center space-x-2">
                 <i data-lucide="calendar-range" class="w-4 h-4"></i>
-                <span>Jadwal Bengkel & Booking Kelas</span>
+                <span>Jadwal Bengkel &amp; Booking Kelas</span>
                 <span id="badge-schedules" class="px-2 py-0.5 text-[11px] bg-indigo-100 text-indigo-700 rounded-full">0</span>
             </button>
-            <button onclick="switchTab('borrowers')" id="tab-borrowers" class="pb-3 text-sm font-semibold border-b-2 border-transparent text-slate-500 hover:text-slate-900 whitespace-nowrap transition flex items-center space-x-2">
+            <button type="button" onclick="switchTab('borrowers')" id="tab-borrowers" class="pb-3 text-sm font-semibold border-b-2 border-transparent text-slate-500 hover:text-slate-900 whitespace-nowrap transition flex items-center space-x-2">
                 <i data-lucide="user-check" class="w-4 h-4"></i>
-                <span>Peminjam Aktif & Status Siswa</span>
+                <span>Peminjam Aktif &amp; Status Siswa</span>
                 <span id="badge-borrowers" class="px-2 py-0.5 text-[11px] bg-amber-100 text-amber-800 rounded-full">0</span>
             </button>
         </div>
@@ -253,7 +367,7 @@
                         <thead>
                             <tr class="bg-slate-50 border-b border-slate-200 text-[11px] font-bold uppercase text-slate-600">
                                 <th class="py-3.5 px-4">Kode QR</th>
-                                <th class="py-3.5 px-4">Nama Alat & Spesifikasi</th>
+                                <th class="py-3.5 px-4">Nama Alat &amp; Spesifikasi</th>
                                 <th class="py-3.5 px-4 text-center">Total</th>
                                 <th class="py-3.5 px-4 text-center text-emerald-700">Tersedia</th>
                                 <th class="py-3.5 px-4 text-center text-amber-700">Dipinjam</th>
@@ -299,7 +413,7 @@
                     </div>
 
                     <div class="lg:col-span-8 bg-slate-50 p-4 rounded-2xl border border-slate-200 space-y-3">
-                        <label class="block text-xs font-bold text-slate-700">2. Masukkan Daftar Kebutuhan Alat & Jumlah Unit</label>
+                        <label class="block text-xs font-bold text-slate-700">2. Masukkan Daftar Kebutuhan Alat &amp; Jumlah Unit</label>
                         <div class="flex flex-col sm:flex-row gap-2">
                             <select id="sim-item-select" class="w-full sm:flex-grow min-h-[44px] px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-teal-600">
                                 <!-- Diisi dinamis -->
@@ -329,10 +443,10 @@
         <div id="section-schedules" class="space-y-4 hidden">
             <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex flex-col sm:flex-row justify-between items-stretch sm:items-center gap-3">
                 <div>
-                    <h3 class="font-bold text-slate-900 text-sm">Jadwal Penggunaan Bengkel & Reservasi Alat Kelas</h3>
+                    <h3 class="font-bold text-slate-900 text-sm">Jadwal Penggunaan Bengkel &amp; Reservasi Alat Kelas</h3>
                     <p class="text-xs text-slate-500 mt-0.5">Periksa jadwal guru lain sebelum mengunci slot praktikum Anda. Booking baru otomatis masuk ke sistem PLP.</p>
                 </div>
-                <button onclick="openBookingModal()" class="w-full sm:w-auto min-h-[42px] px-4 py-2.5 bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs rounded-xl shadow-sm transition flex items-center justify-center space-x-1.5 shrink-0">
+                <button type="button" onclick="openBookingModal()" class="w-full sm:w-auto min-h-[42px] px-4 py-2.5 bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs rounded-xl shadow-sm transition flex items-center justify-center space-x-1.5 shrink-0">
                     <i data-lucide="calendar-plus" class="w-4 h-4"></i>
                     <span>+ Ajukan Booking Kelas</span>
                 </button>
@@ -395,22 +509,22 @@
     <!-- MOBILE-FIRST BOTTOM NAVIGATION BAR (< 640px) -->
     <nav aria-label="Navigasi Portal Guru" class="sm:hidden fixed bottom-0 inset-x-0 z-30 bg-white/95 backdrop-blur border-t border-slate-200 pb-safe shadow-[0_-4px_16px_rgba(15,23,42,0.06)]">
         <div class="grid grid-cols-4 h-16">
-            <button onclick="switchTab('catalog')" id="mob-tab-catalog" class="flex flex-col items-center justify-center space-y-1 text-teal-700 font-bold transition">
+            <button type="button" onclick="switchTab('catalog')" id="mob-tab-catalog" class="flex flex-col items-center justify-center space-y-1 text-teal-700 font-bold transition">
                 <i data-lucide="layers" class="w-5 h-5"></i>
                 <span class="text-[10px]">Katalog</span>
             </button>
-            <button onclick="switchTab('simulator')" id="mob-tab-simulator" class="flex flex-col items-center justify-center space-y-1 text-slate-500 font-semibold transition">
+            <button type="button" onclick="switchTab('simulator')" id="mob-tab-simulator" class="flex flex-col items-center justify-center space-y-1 text-slate-500 font-semibold transition">
                 <i data-lucide="calculator" class="w-5 h-5"></i>
                 <span class="text-[10px]">Simulasi</span>
             </button>
-            <button onclick="switchTab('schedules')" id="mob-tab-schedules" class="relative flex flex-col items-center justify-center space-y-1 text-slate-500 font-semibold transition">
+            <button type="button" onclick="switchTab('schedules')" id="mob-tab-schedules" class="relative flex flex-col items-center justify-center space-y-1 text-slate-500 font-semibold transition">
                 <div class="relative">
                     <i data-lucide="calendar-range" class="w-5 h-5"></i>
                     <span id="mob-badge-schedules" class="absolute -top-1.5 -right-2.5 min-w-[16px] h-4 px-1 text-[9px] font-extrabold bg-indigo-600 text-white rounded-full flex items-center justify-center">0</span>
                 </div>
                 <span class="text-[10px]">Jadwal</span>
             </button>
-            <button onclick="switchTab('borrowers')" id="mob-tab-borrowers" class="relative flex flex-col items-center justify-center space-y-1 text-slate-500 font-semibold transition">
+            <button type="button" onclick="switchTab('borrowers')" id="mob-tab-borrowers" class="relative flex flex-col items-center justify-center space-y-1 text-slate-500 font-semibold transition">
                 <div class="relative">
                     <i data-lucide="user-check" class="w-5 h-5"></i>
                     <span id="mob-badge-borrowers" class="absolute -top-1.5 -right-2.5 min-w-[16px] h-4 px-1 text-[9px] font-extrabold bg-amber-500 text-white rounded-full flex items-center justify-center">0</span>
@@ -433,7 +547,7 @@
                     </div>
                     <h3 id="insp-name" class="font-extrabold text-slate-900 text-base sm:text-xl mt-1.5"></h3>
                 </div>
-                <button onclick="closeModal('itemInspectorModal')" class="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg">
+                <button type="button" onclick="closeModal('itemInspectorModal')" class="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg">
                     <i data-lucide="x" class="w-5 h-5"></i>
                 </button>
             </div>
@@ -465,7 +579,7 @@
 
                 <!-- Spesifikasi & Lokasi Rak -->
                 <div>
-                    <span class="font-bold text-slate-700 block mb-1">Spesifikasi Teknis & Lokasi Penyimpanan:</span>
+                    <span class="font-bold text-slate-700 block mb-1">Spesifikasi Teknis &amp; Lokasi Penyimpanan:</span>
                     <p id="insp-desc" class="p-3.5 bg-slate-50 rounded-xl border border-slate-200 text-slate-700 leading-relaxed"></p>
                 </div>
 
@@ -483,7 +597,7 @@
 
                 <!-- Riwayat Audit Penggunaan Sebelumnya -->
                 <div>
-                    <span class="font-bold text-slate-800 block mb-1.5">Riwayat Penggunaan & Kondisi Terakhir:</span>
+                    <span class="font-bold text-slate-800 block mb-1.5">Riwayat Penggunaan &amp; Kondisi Terakhir:</span>
                     <div id="insp-history-list" class="space-y-1.5 max-h-32 overflow-y-auto bg-slate-50 p-2.5 rounded-xl border border-slate-200"></div>
                 </div>
             </div>
@@ -515,7 +629,7 @@
                         <p class="text-[11px] text-slate-500">Otomatis mengunci stok alat di sistem SIPAKAT PLP</p>
                     </div>
                 </div>
-                <button onclick="closeModal('teacherBookingModal')" class="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg">
+                <button type="button" onclick="closeModal('teacherBookingModal')" class="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg">
                     <i data-lucide="x" class="w-5 h-5"></i>
                 </button>
             </div>
@@ -574,7 +688,7 @@
 
                 <div class="pt-1 grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                     <button type="button" onclick="closeModal('teacherBookingModal')" class="order-2 sm:order-1 min-h-[44px] px-4 py-2.5 border border-slate-200 text-slate-700 font-semibold text-sm rounded-xl hover:bg-slate-50">Batal</button>
-                    <button type="submit" class="order-1 sm:order-2 min-h-[44px] px-4 py-2.5 bg-teal-600 hover:bg-teal-700 text-white font-bold text-sm rounded-xl shadow-md">Kunci Jadwal & Sinkronkan</button>
+                    <button type="submit" class="order-1 sm:order-2 min-h-[44px] px-4 py-2.5 bg-teal-600 hover:bg-teal-700 text-white font-bold text-sm rounded-xl shadow-md">Kunci Jadwal &amp; Sinkronkan</button>
                 </div>
             </form>
         </div>
@@ -587,7 +701,7 @@
         <div class="bg-white rounded-2xl max-w-md w-full p-5 sm:p-6 shadow-2xl border border-slate-100">
             <div class="flex justify-between items-center mb-3 pb-3 border-b border-slate-100">
                 <h3 class="font-bold text-slate-900 text-base">Sinkronisasi Data Antar Perangkat</h3>
-                <button onclick="closeModal('syncFileModal')" class="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg">
+                <button type="button" onclick="closeModal('syncFileModal')" class="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg">
                     <i data-lucide="x" class="w-5 h-5"></i>
                 </button>
             </div>
@@ -611,14 +725,14 @@
         <div class="bg-white rounded-2xl max-w-2xl w-full p-4 sm:p-6 shadow-2xl border border-slate-100 my-auto max-h-[92vh] overflow-y-auto">
             <div class="flex justify-between items-center mb-4 pb-3 border-b border-slate-100">
                 <h3 class="font-bold text-slate-900 text-sm sm:text-base">Dokumen Berita Acara Serah Terima (BAST)</h3>
-                <button onclick="closeModal('bastViewModal')" class="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg">
+                <button type="button" onclick="closeModal('bastViewModal')" class="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg">
                     <i data-lucide="x" class="w-5 h-5"></i>
                 </button>
             </div>
             <div id="bast-view-body" class="bg-white border border-slate-300 rounded-xl p-4 sm:p-6 text-slate-900 space-y-4 text-xs"></div>
             <div class="pt-4 mt-4 border-t border-slate-100 flex justify-end gap-2">
-                <button onclick="closeModal('bastViewModal')" class="min-h-[40px] px-4 py-2 border border-slate-200 text-slate-700 font-semibold text-xs rounded-xl hover:bg-slate-50">Tutup</button>
-                <button onclick="printCurrentBast()" class="min-h-[40px] px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs rounded-xl shadow-sm flex items-center space-x-1.5">
+                <button type="button" onclick="closeModal('bastViewModal')" class="min-h-[40px] px-4 py-2 border border-slate-200 text-slate-700 font-semibold text-xs rounded-xl hover:bg-slate-50">Tutup</button>
+                <button type="button" onclick="printCurrentBast()" class="min-h-[40px] px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs rounded-xl shadow-sm flex items-center space-x-1.5">
                     <i data-lucide="printer" class="w-4 h-4"></i>
                     <span>Cetak / PDF</span>
                 </button>
@@ -640,17 +754,70 @@
     <script>
         window.lucide = window.lucide || { createIcons: function() {} };
 
-        // Kunci LocalStorage yang IDENTIK dengan index.html agar saling terhubung
+        // Kunci LocalStorage & SessionStorage yang IDENTIK dengan index.html
         const KEY_ITEMS = 'sipakat_pro_items_v3';
         const KEY_USERS = 'sipakat_pro_users_v3';
         const KEY_LOANS = 'sipakat_pro_loans_v3';
         const KEY_BOOKINGS = 'sipakat_pro_bookings_v3';
         const KEY_SESSION = 'sipakat_active_session_v1';
+        const KEY_SHARED_SESSION = 'sipakat_shared_auth_session_v1';
 
         function getRelativeDate(daysOffset) {
             const d = new Date();
             d.setDate(d.getDate() + daysOffset);
             return d.toISOString().split('T')[0];
+        }
+
+        function isBlobPreviewEnv() {
+            return window.location.protocol === 'blob:' || window.location.href.startsWith('blob:');
+        }
+
+        function redirectToInitialLoginPage() {
+            if (isBlobPreviewEnv()) {
+                return false;
+            }
+            try {
+                const loginUrl = new URL('index.html?logged_out=1', window.location.href).href;
+                window.location.replace(loginUrl);
+                return true;
+            } catch (err) {
+                console.warn('Pengalihan ke index.html gagal:', err);
+                return false;
+            }
+        }
+
+        function handleManualLoginRedirect(e) {
+            if (isBlobPreviewEnv()) {
+                e.preventDefault();
+                showToast('Dalam mode Preview tunggal, silakan buka tab index.html untuk kembali ke layar login awal.', 'error');
+            }
+        }
+
+        // Fungsi Logout Bersih: Hapus seluruh token sesi & kembali ke halaman login awal (index.html)
+        function logoutUser() {
+            try {
+                sessionStorage.removeItem(KEY_SESSION);
+                localStorage.removeItem(KEY_SHARED_SESSION);
+            } catch (e) {
+                console.warn('Gagal menghapus storage sesi:', e);
+            }
+
+            // Tampilkan overlay status logout & alihkan ke halaman login awal (index.html)
+            const overlay = document.getElementById('logout-redirect-overlay');
+            const desc = document.getElementById('logout-overlay-desc');
+            if (overlay) {
+                overlay.classList.remove('hidden');
+                if (isBlobPreviewEnv() && desc) {
+                    desc.textContent = 'Sesi telah ditutup. Dalam mode Preview terpisah, silakan kembali ke tab halaman login awal (index.html).';
+                }
+                lucide.createIcons();
+            }
+
+            showToast('Sesi ditutup. Kembali ke halaman login awal...');
+
+            setTimeout(() => {
+                redirectToInitialLoginPage();
+            }, 350);
         }
 
         // Seed Data Fallback (Jika file ini dibuka lebih dulu sebelum index.html)
@@ -740,8 +907,8 @@
         let loans = [];
         let bookings = [];
         let catalogViewMode = 'grid';
-        let simCart = []; // Daftar alat dalam Simulasi Kesiapan Praktik
-        let tbCart = [];  // Daftar alat dalam Form Booking Guru
+        let simCart = [];
+        let tbCart = [];
 
         // 1. Muat & Sinkronkan Data dari LocalStorage Bersama
         function loadSharedData(isAutoSync = false) {
@@ -763,13 +930,15 @@
                 saveSharedData();
             }
 
-            // Cek jika ada sesi login aktif dari index.html
+            // Sinkronkan identitas guru dari sesi login aktif jika tersedia
             try {
-                const rawSession = sessionStorage.getItem(KEY_SESSION);
+                const rawSession = sessionStorage.getItem(KEY_SESSION) || localStorage.getItem(KEY_SHARED_SESSION);
                 if (rawSession) {
                     const sess = JSON.parse(rawSession);
                     if (sess && sess.name) {
                         document.getElementById('teacher-identity-label').textContent = `${sess.role}: ${sess.name}`;
+                        const tbTeacher = document.getElementById('tb-teacher');
+                        if (tbTeacher) tbTeacher.value = sess.name;
                     }
                 }
             } catch (e) {}
@@ -809,14 +978,33 @@
             }, 350);
         }
 
-        // Listener Real-Time: Jika index.html diubah di tab sebelah, halaman ini langsung ter-update!
+        // Listener Real-Time: Sinkronisasi data & auto-logout jika sesi ditutup di tab lain
         window.addEventListener('storage', (event) => {
+            if (event.key === KEY_SHARED_SESSION && !event.newValue) {
+                sessionStorage.removeItem(KEY_SESSION);
+                if (typeof window.verifyGuruSessionGuard === 'function') {
+                    window.verifyGuruSessionGuard();
+                } else {
+                    redirectToInitialLoginPage();
+                }
+                return;
+            }
             if (!event.key || [KEY_ITEMS, KEY_USERS, KEY_LOANS, KEY_BOOKINGS].includes(event.key)) {
                 loadSharedData(true);
             }
         });
 
-        // Segarkan otomatis saat guru kembali fokus ke tab browser ini
+        window.addEventListener('focus', () => {
+            if (typeof window.verifyGuruSessionGuard === 'function' && !window.verifyGuruSessionGuard()) return;
+            loadSharedData(false);
+        });
+        document.addEventListener('visibilitychange', () => {
+            if (!document.hidden) {
+                if (typeof window.verifyGuruSessionGuard === 'function' && !window.verifyGuruSessionGuard()) return;
+                loadSharedData(false);
+            }
+        });
+
         window.addEventListener('focus', () => loadSharedData(false));
         document.addEventListener('visibilitychange', () => {
             if (!document.hidden) loadSharedData(false);
@@ -829,11 +1017,8 @@
 
             const checkDate = targetDate || getRelativeDate(0);
 
-            // Hitung unit sedang dipinjam yang belum dikembalikan pada checkDate
             let borrowed = 0;
             loans.filter(l => l.status === 'active').forEach(loan => {
-                // Jika dicek untuk hari ini, semua active loan mengurangi stok.
-                // Jika dicek untuk tanggal masa depan, peminjaman yang jatuh tempo >= checkDate atau masih overdue diperhitungkan.
                 const stillOut = (checkDate <= getRelativeDate(0)) || (loan.dueDate >= checkDate) || (checkOverdueDays(loan.dueDate) > 0);
                 if (stillOut) {
                     loan.items.forEach(li => {
@@ -842,7 +1027,6 @@
                 }
             });
 
-            // Hitung unit terkunci oleh jadwal praktikum kelas pada checkDate
             let booked = 0;
             bookings.forEach(b => {
                 if (b.status === 'completed' || b.status === 'cancelled') return;
@@ -976,7 +1160,6 @@
                 return;
             }
 
-            // Render Grid Cards
             gridEl.innerHTML = filtered.map(item => {
                 const st = getStockBreakdownForDate(item.id, today);
                 const pctAvail = st.total > 0 ? Math.round((st.available / st.total) * 100) : 0;
@@ -1006,7 +1189,6 @@
                     </div>
 
                     <div>
-                        <!-- Segmented Visual Bar Distribusi Stok -->
                         <div class="mb-2.5">
                             <div class="flex justify-between text-[10px] font-bold text-slate-500 mb-1">
                                 <span>Distribusi ${st.total} Unit</span>
@@ -1020,7 +1202,6 @@
                             </div>
                         </div>
 
-                        <!-- Rincian Angka 4 Status -->
                         <div class="grid grid-cols-4 gap-1 text-center text-[10px] bg-slate-50 p-2 rounded-xl border border-slate-100 mb-3">
                             <div>
                                 <span class="text-slate-400 block">Tersedia</span>
@@ -1041,11 +1222,11 @@
                         </div>
 
                         <div class="grid grid-cols-2 gap-2">
-                            <button onclick="openItemInspector('${item.id}')" class="min-h-[40px] py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-bold rounded-xl transition flex items-center justify-center space-x-1.5">
+                            <button type="button" onclick="openItemInspector('${item.id}')" class="min-h-[40px] py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-bold rounded-xl transition flex items-center justify-center space-x-1.5">
                                 <i data-lucide="eye" class="w-3.5 h-3.5 text-teal-700"></i>
                                 <span>Detail Lengkap</span>
                             </button>
-                            <button onclick="quickAddToSimulator('${item.id}')" class="min-h-[40px] py-2 bg-teal-600 hover:bg-teal-700 text-white text-xs font-bold rounded-xl transition shadow-sm flex items-center justify-center space-x-1.5">
+                            <button type="button" onclick="quickAddToSimulator('${item.id}')" class="min-h-[40px] py-2 bg-teal-600 hover:bg-teal-700 text-white text-xs font-bold rounded-xl transition shadow-sm flex items-center justify-center space-x-1.5">
                                 <i data-lucide="plus-circle" class="w-3.5 h-3.5"></i>
                                 <span>Cek Simulasi</span>
                             </button>
@@ -1054,7 +1235,6 @@
                 </div>`;
             }).join('');
 
-            // Render Matrix Table
             tbodyEl.innerHTML = filtered.map(item => {
                 const st = getStockBreakdownForDate(item.id, today);
                 return `
@@ -1070,8 +1250,8 @@
                     <td class="py-3 px-4 text-center font-bold text-indigo-600">${st.booked}</td>
                     <td class="py-3 px-4 text-center font-bold text-rose-600">${st.damaged}</td>
                     <td class="py-3 px-4 text-right whitespace-nowrap">
-                        <button onclick="openItemInspector('${item.id}')" class="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold rounded-lg mr-1">Detail</button>
-                        <button onclick="quickAddToSimulator('${item.id}')" class="px-2.5 py-1.5 bg-teal-600 hover:bg-teal-700 text-white font-bold rounded-lg">+ Simulasi</button>
+                        <button type="button" onclick="openItemInspector('${item.id}')" class="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold rounded-lg mr-1">Detail</button>
+                        <button type="button" onclick="quickAddToSimulator('${item.id}')" class="px-2.5 py-1.5 bg-teal-600 hover:bg-teal-700 text-white font-bold rounded-lg">+ Simulasi</button>
                     </td>
                 </tr>`;
             }).join('');
@@ -1095,7 +1275,6 @@
             document.getElementById('insp-damaged').textContent = st.damaged;
             document.getElementById('insp-desc').textContent = item.desc || 'Tidak ada catatan spesifikasi tambahan.';
 
-            // Peminjam aktif
             const borrowersEl = document.getElementById('insp-borrowers-list');
             const activeHolders = [];
             loans.filter(l => l.status === 'active').forEach(l => {
@@ -1122,7 +1301,6 @@
                 }).join('');
             }
 
-            // Jadwal kelas yang mengunci alat ini
             const bkgEl = document.getElementById('insp-bookings-list');
             const lockedBookings = [];
             bookings.filter(b => b.status === 'active' || b.status === 'scheduled').forEach(b => {
@@ -1145,7 +1323,6 @@
                 `).join('');
             }
 
-            // Riwayat selesai
             const histEl = document.getElementById('insp-history-list');
             const pastLogs = [];
             loans.filter(l => l.status === 'completed').forEach(l => {
@@ -1447,7 +1624,6 @@
             const startTime = document.getElementById('tb-start').value;
             const endTime = document.getElementById('tb-end').value;
 
-            // Validasi ulang stok terhadap perubahan terbaru
             for (const c of tbCart) {
                 const st = getStockBreakdownForDate(c.itemId, date);
                 if (c.qty > st.available) {
@@ -1484,7 +1660,6 @@
             const loanListEl = document.getElementById('teacher-active-loans-list');
             const qStudent = (document.getElementById('student-check-search')?.value || '').toLowerCase();
 
-            // 1. Cek status tiap siswa/user
             const filteredUsers = users.filter(u =>
                 u.name.toLowerCase().includes(qStudent) ||
                 u.nis.toLowerCase().includes(qStudent) ||
@@ -1527,7 +1702,6 @@
                 }).join('');
             }
 
-            // 2. Daftar Peminjaman Aktif
             const activeLoans = loans.filter(l => l.status === 'active');
             document.getElementById('active-loans-count-label').textContent = `${activeLoans.length} transaksi aktif`;
 
@@ -1556,7 +1730,7 @@
                             </p>
                         </div>
                         <div class="shrink-0">
-                            <button onclick="openBastModal('${l.id}')" class="w-full lg:w-auto min-h-[38px] px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-bold rounded-xl transition flex items-center justify-center space-x-1.5">
+                            <button type="button" onclick="openBastModal('${l.id}')" class="w-full lg:w-auto min-h-[38px] px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-bold rounded-xl transition flex items-center justify-center space-x-1.5">
                                 <i data-lucide="file-signature" class="w-3.5 h-3.5 text-teal-700"></i>
                                 <span>Lihat BAST Digital</span>
                             </button>
@@ -1696,6 +1870,9 @@
         }
 
         window.onload = function() {
+            if (typeof window.verifyGuruSessionGuard === 'function' && !window.verifyGuruSessionGuard()) {
+                return;
+            }
             document.getElementById('sim-target-date').value = getRelativeDate(0);
             loadSharedData(false);
         };
