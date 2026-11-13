@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<html lang="id" class="h-full bg-slate-50">
+<html lang="id" class="h-full bg-slate-50 overflow-x-hidden">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0">
     <title>SIPAKAT - Sistem Peminjaman Alat Bengkel TI</title>
     <!-- Tailwind CSS CDN -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -30,127 +30,284 @@
         .animate-scan {
             animation: scanline 2.2s ease-in-out infinite;
         }
+        /* Sembunyikan scrollbar horizontal namun tetap bisa digeser sentuh */
+        .no-scrollbar::-webkit-scrollbar {
+            display: none;
+        }
+        .no-scrollbar {
+            -ms-overflow-style: none;
+            scrollbar-width: none;
+        }
+        /* Kanvas tanda tangan anti-scroll saat disentuh di HP */
+        #signature-canvas {
+            touch-action: none;
+            cursor: crosshair;
+        }
+        /* Safe area padding untuk perangkat mobile modern */
+        .pb-safe {
+            padding-bottom: env(safe-area-inset-bottom, 0px);
+        }
+        /* Aturan cetak khusus lembar Berita Acara Serah Terima (BAST) ke PDF */
+        @media print {
+            body > *:not(#print-bast-area) {
+                display: none !important;
+            }
+            #print-bast-area {
+                display: block !important;
+                position: static !important;
+                width: 100% !important;
+                background: white !important;
+                color: black !important;
+                padding: 0 !important;
+                margin: 0 !important;
+            }
+        }
     </style>
 </head>
-<body class="h-full font-sans text-slate-800 antialiased flex flex-col justify-between">
+<body class="min-h-full font-sans text-slate-800 antialiased flex flex-col justify-between overflow-x-hidden">
 
-    <!-- TOP HEADER NAVBAR -->
-    <header class="bg-white border-b border-slate-200 sticky top-0 z-30">
-        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-2">
+    <!-- ===================================================================== -->
+    <!-- HALAMAN LOGIN AMAN (CLIENT-SIDE SHA-256 + SESSION GUARD)              -->
+    <!-- ===================================================================== -->
+    <div id="login-screen" class="min-h-screen bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900 flex items-center justify-center p-3.5 sm:p-6">
+        <div class="max-w-md w-full bg-white rounded-2xl sm:rounded-3xl shadow-2xl border border-slate-200 overflow-hidden">
+            <div class="bg-gradient-to-r from-indigo-600 to-violet-700 px-5 py-6 sm:p-7 text-white text-center">
+                <div class="w-12 h-12 sm:w-14 sm:h-14 rounded-2xl bg-white/15 backdrop-blur-sm flex items-center justify-center mx-auto mb-3 shadow-lg">
+                    <i data-lucide="shield-check" class="w-7 h-7 sm:w-8 sm:h-8 text-white"></i>
+                </div>
+                <h1 class="text-lg sm:text-xl font-extrabold tracking-tight">SIPAKAT BENGKEL TI</h1>
+                <p class="text-xs text-indigo-100 mt-1">Autentikasi Petugas PLP & Guru Pengampu</p>
+            </div>
+
+            <div class="p-5 sm:p-7 space-y-4 sm:space-y-5">
+                <!-- Peringatan Brute-Force Lockout -->
+                <div id="login-lockout-box" class="hidden p-3.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs flex items-start space-x-2.5">
+                    <i data-lucide="lock" class="w-4 h-4 text-rose-600 shrink-0 mt-0.5"></i>
+                    <div>
+                        <strong class="font-bold block">Akses Login Dikunci Sementara</strong>
+                        <span id="login-lockout-text">Terlalu banyak percobaan gagal. Silakan tunggu...</span>
+                    </div>
+                </div>
+
+                <form onsubmit="handleLoginSubmit(event)" class="space-y-4">
+                    <div>
+                        <label class="block text-xs font-bold text-slate-700 mb-1.5">Username Petugas / NIP</label>
+                        <div class="relative">
+                            <i data-lucide="user" class="w-4 h-4 absolute left-3.5 top-3.5 text-slate-400"></i>
+                            <input type="text" id="login-username" required autocomplete="username" placeholder="Masukkan username (misal: plp_budi)" class="w-full min-h-[44px] pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-sm font-medium focus:outline-none focus:ring-2 focus:ring-indigo-600 focus:bg-white transition">
+                        </div>
+                    </div>
+
+                    <div>
+                        <label class="block text-xs font-bold text-slate-700 mb-1.5">PIN / Kata Sandi Akses</label>
+                        <div class="relative">
+                            <i data-lucide="key-round" class="w-4 h-4 absolute left-3.5 top-3.5 text-slate-400"></i>
+                            <input type="password" id="login-password" required autocomplete="current-password" placeholder="••••••••" class="w-full min-h-[44px] pl-10 pr-11 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-sm font-medium focus:outline-none focus:ring-2 focus:ring-indigo-600 focus:bg-white transition">
+                            <button type="button" onclick="toggleLoginPasswordVisibility()" class="absolute right-2.5 top-2 text-slate-400 hover:text-slate-600 p-1.5 rounded-lg" title="Tampilkan/Sembunyikan Sandi">
+                                <i id="login-eye-icon" data-lucide="eye" class="w-4 h-4"></i>
+                            </button>
+                        </div>
+                    </div>
+
+                    <button type="submit" id="btn-login-submit" class="w-full min-h-[46px] py-3 bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-300 disabled:cursor-not-allowed text-white font-bold text-sm rounded-xl shadow-lg shadow-indigo-200 transition flex items-center justify-center space-x-2">
+                        <i data-lucide="log-in" class="w-4 h-4"></i>
+                        <span>Masuk ke Sistem</span>
+                    </button>
+                </form>
+
+                <!-- Info Keamanan & Bantuan Akun Demo -->
+                <div class="pt-4 border-t border-slate-100 space-y-3">
+                    <div class="flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-500">
+                        <span class="flex items-center space-x-1"><i data-lucide="cpu" class="w-3.5 h-3.5 text-emerald-600 shrink-0"></i><span>Enkripsi SHA-256 + Salt</span></span>
+                        <span class="flex items-center space-x-1"><i data-lucide="clock" class="w-3.5 h-3.5 text-indigo-600 shrink-0"></i><span>Auto-Logout 60 Menit</span></span>
+                    </div>
+                    <div class="bg-slate-50 p-3 rounded-xl border border-slate-200 text-[11px] text-slate-600 space-y-2">
+                        <span class="font-bold text-slate-800 block">Akun Demo Prototipe (Ketuk untuk isi cepat):</span>
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                            <button type="button" onclick="fillDemoLogin('plp_budi', '123456')" class="min-h-[38px] px-3 py-2 bg-white hover:bg-indigo-50 border border-slate-200 hover:border-indigo-300 rounded-xl font-mono text-[11px] text-indigo-700 font-semibold transition text-center">
+                                PLP: plp_budi / 123456
+                            </button>
+                            <button type="button" onclick="fillDemoLogin('guru_hendra', 'guru2026')" class="min-h-[38px] px-3 py-2 bg-white hover:bg-indigo-50 border border-slate-200 hover:border-indigo-300 rounded-xl font-mono text-[11px] text-emerald-700 font-semibold transition text-center">
+                                Guru: guru_hendra / guru2026
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ===================================================================== -->
+    <!-- MAIN APP WRAPPER (TERKUNCI HINGGA LOGIN BERHASIL)                     -->
+    <!-- ===================================================================== -->
+    <div id="app-wrapper" class="hidden min-h-screen flex flex-col justify-between">
+
+    <!-- TOP HEADER NAVBAR (MOBILE-FIRST RESPONSIVE) -->
+    <header class="bg-white/95 backdrop-blur border-b border-slate-200 sticky top-0 z-30">
+        <div class="max-w-7xl mx-auto px-3.5 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-2">
             <!-- Brand Logo -->
-            <div class="flex items-center space-x-3 shrink-0">
-                <div class="w-10 h-10 rounded-xl bg-indigo-600 flex items-center justify-center text-white shadow-md shadow-indigo-200">
-                    <i data-lucide="wrench" class="w-5 h-5"></i>
+            <div class="flex items-center space-x-2.5 sm:space-x-3 shrink-0">
+                <div class="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-indigo-600 flex items-center justify-center text-white shadow-md shadow-indigo-200">
+                    <i data-lucide="wrench" class="w-4 h-4 sm:w-5 sm:h-5"></i>
                 </div>
                 <div>
-                    <span class="text-lg font-extrabold tracking-tight text-slate-900 block leading-none">SIPAKAT</span>
-                    <span class="text-[11px] text-slate-500 font-medium">Bengkel TI • Smart Inventory</span>
+                    <span class="text-base sm:text-lg font-extrabold tracking-tight text-slate-900 block leading-none">SIPAKAT</span>
+                    <span class="text-[10px] sm:text-[11px] text-slate-500 font-medium block mt-0.5">Bengkel TI • Smart Inventory</span>
                 </div>
             </div>
 
-            <!-- Right Quick Action Buttons -->
-            <div class="flex items-center space-x-1.5 sm:space-x-2 overflow-x-auto py-1">
-                <button onclick="openScanModal()" title="Simulasi Scan QR Alat / Kartu Pelajar" class="px-2.5 sm:px-3 py-1.5 text-xs font-semibold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded-xl transition flex items-center space-x-1.5 shrink-0">
+            <!-- Mobile Action Controls (Scan QR + Menu Utilitas Drawer) -->
+            <div class="flex md:hidden items-center space-x-2">
+                <button onclick="openScanModal()" class="min-h-[40px] px-3 py-2 text-xs font-bold text-indigo-700 bg-indigo-50 active:bg-indigo-100 border border-indigo-200 rounded-xl transition flex items-center space-x-1.5">
                     <i data-lucide="qr-code" class="w-4 h-4"></i>
                     <span>Scan QR</span>
                 </button>
-                <button onclick="exportCSV()" title="Unduh Laporan CSV (Excel)" class="px-2.5 sm:px-3 py-1.5 text-xs font-semibold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-xl transition flex items-center space-x-1.5 shrink-0">
+                <button onclick="toggleMobileUtilityMenu()" id="btn-mobile-menu" aria-label="Menu Utilitas" class="min-h-[40px] min-w-[40px] p-2 text-slate-700 bg-slate-100 active:bg-slate-200 rounded-xl transition flex items-center justify-center">
+                    <i data-lucide="more-vertical" class="w-5 h-5"></i>
+                </button>
+            </div>
+
+            <!-- Tablet & Desktop Quick Action Buttons -->
+            <div class="hidden md:flex items-center space-x-2">
+                <button onclick="openScanModal()" title="Simulasi Scan QR Alat / Kartu Pelajar" class="min-h-[38px] px-3 py-1.5 text-xs font-semibold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded-xl transition flex items-center space-x-1.5 shrink-0">
+                    <i data-lucide="qr-code" class="w-4 h-4"></i>
+                    <span>Scan QR</span>
+                </button>
+                <button onclick="exportCSV()" title="Unduh Laporan CSV (Excel)" class="min-h-[38px] px-3 py-1.5 text-xs font-semibold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-xl transition flex items-center space-x-1.5 shrink-0">
                     <i data-lucide="file-spreadsheet" class="w-4 h-4"></i>
-                    <span class="hidden md:inline">Laporan CSV</span>
+                    <span>Laporan CSV</span>
                 </button>
-                <button onclick="openModal('backupModal')" title="Backup / Restore JSON" class="px-2.5 sm:px-3 py-1.5 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl transition flex items-center space-x-1.5 shrink-0">
+                <button onclick="openModal('backupModal')" title="Backup / Restore JSON" class="min-h-[38px] px-3 py-1.5 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl transition flex items-center space-x-1.5 shrink-0">
                     <i data-lucide="database-backup" class="w-4 h-4"></i>
-                    <span class="hidden md:inline">Backup</span>
+                    <span>Backup</span>
                 </button>
-                <button onclick="openModal('resetModal')" title="Reset Data Demo ke Awal" class="px-2.5 sm:px-3 py-1.5 text-xs font-semibold text-rose-600 bg-rose-50 hover:bg-rose-100 rounded-xl transition flex items-center space-x-1.5 shrink-0">
+                <button onclick="openModal('resetModal')" title="Reset Data Demo ke Awal" class="min-h-[38px] px-3 py-1.5 text-xs font-semibold text-amber-700 bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded-xl transition flex items-center space-x-1.5 shrink-0">
                     <i data-lucide="rotate-ccw" class="w-4 h-4"></i>
-                    <span class="hidden sm:inline">Reset</span>
+                    <span>Reset</span>
+                </button>
+                <button onclick="openModal('changePinModal')" title="Ubah PIN Keamanan Akun" class="min-h-[38px] px-3 py-1.5 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl transition flex items-center space-x-1.5 shrink-0">
+                    <i data-lucide="key-round" class="w-4 h-4"></i>
+                    <span>Ganti PIN</span>
+                </button>
+                <button onclick="logoutUser()" title="Keluar dari Sesi Aman" class="min-h-[38px] px-3 py-1.5 text-xs font-bold text-rose-600 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-xl transition flex items-center space-x-1.5 shrink-0">
+                    <i data-lucide="log-out" class="w-4 h-4"></i>
+                    <span>Keluar</span>
+                </button>
+            </div>
+        </div>
+
+        <!-- Dropdown Menu Utilitas Khusus Mobile (< 768px) -->
+        <div id="mobile-utility-menu" class="hidden md:hidden border-t border-slate-200 bg-white px-3.5 py-3 shadow-xl">
+            <div class="grid grid-cols-2 gap-2">
+                <button onclick="closeMobileUtilityMenu(); exportCSV();" class="min-h-[42px] px-3 py-2 text-xs font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-xl flex items-center justify-center space-x-1.5">
+                    <i data-lucide="file-spreadsheet" class="w-4 h-4 shrink-0"></i>
+                    <span>Laporan CSV</span>
+                </button>
+                <button onclick="closeMobileUtilityMenu(); openModal('backupModal');" class="min-h-[42px] px-3 py-2 text-xs font-semibold text-slate-700 bg-slate-100 rounded-xl flex items-center justify-center space-x-1.5">
+                    <i data-lucide="database-backup" class="w-4 h-4 shrink-0"></i>
+                    <span>Backup JSON</span>
+                </button>
+                <button onclick="closeMobileUtilityMenu(); openModal('changePinModal');" class="min-h-[42px] px-3 py-2 text-xs font-semibold text-slate-700 bg-slate-100 rounded-xl flex items-center justify-center space-x-1.5">
+                    <i data-lucide="key-round" class="w-4 h-4 shrink-0"></i>
+                    <span>Ganti PIN</span>
+                </button>
+                <button onclick="closeMobileUtilityMenu(); openModal('resetModal');" class="min-h-[42px] px-3 py-2 text-xs font-semibold text-amber-700 bg-amber-50 border border-amber-200 rounded-xl flex items-center justify-center space-x-1.5">
+                    <i data-lucide="rotate-ccw" class="w-4 h-4 shrink-0"></i>
+                    <span>Reset Demo</span>
+                </button>
+                <button onclick="closeMobileUtilityMenu(); logoutUser();" class="col-span-2 min-h-[42px] px-3 py-2 text-xs font-bold text-rose-600 bg-rose-50 border border-rose-200 rounded-xl flex items-center justify-center space-x-1.5">
+                    <i data-lucide="log-out" class="w-4 h-4 shrink-0"></i>
+                    <span>Keluar dari Sesi Aman</span>
                 </button>
             </div>
         </div>
     </header>
 
     <!-- MAIN CONTAINER -->
-    <main class="flex-grow max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 pb-20 sm:pb-10">
+    <main class="flex-grow max-w-7xl w-full mx-auto px-3.5 sm:px-6 lg:px-8 py-4 sm:py-6 pb-24 sm:pb-10">
         
-        <!-- WELCOME BANNER & PRIMARY ACTION -->
-        <div class="bg-gradient-to-r from-indigo-600 via-indigo-700 to-violet-700 rounded-2xl p-5 sm:p-6 text-white shadow-xl shadow-indigo-100 mb-6 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-            <div>
-                <div class="inline-flex items-center space-x-1.5 px-2.5 py-0.5 rounded-full bg-white/15 text-indigo-100 text-[11px] font-semibold mb-2">
-                    <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
-                    <span>Petugas PLP: Budi Santoso, S.T.</span>
+        <!-- WELCOME BANNER & PRIMARY ACTION (MOBILE-FIRST STACKING) -->
+        <div class="bg-gradient-to-r from-indigo-600 via-indigo-700 to-violet-700 rounded-2xl p-4 sm:p-6 text-white shadow-xl shadow-indigo-100 mb-5 sm:mb-6 flex flex-col lg:flex-row justify-between items-stretch lg:items-center gap-4">
+            <div class="space-y-1">
+                <div class="inline-flex items-center space-x-1.5 px-2.5 py-0.5 rounded-full bg-white/15 text-indigo-100 text-[11px] font-semibold mb-1">
+                    <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse shrink-0"></span>
+                    <span id="active-officer-badge" class="truncate">Petugas PLP: Budi Santoso, S.T.</span>
                 </div>
-                <h1 class="text-xl sm:text-2xl font-bold tracking-tight">Sistem Kendali Peminjaman Alat</h1>
-                <p id="banner-summary" class="text-indigo-100 text-xs sm:text-sm mt-1">Memuat ringkasan data bengkel...</p>
+                <h1 class="text-lg sm:text-2xl font-bold tracking-tight leading-snug">Sistem Kendali Peminjaman Alat</h1>
+                <p id="banner-summary" class="text-indigo-100 text-xs sm:text-sm leading-relaxed">Memuat ringkasan data bengkel...</p>
             </div>
-            <div class="flex flex-wrap gap-2.5 w-full md:w-auto">
-                <button onclick="openBatchLoanModal()" class="flex-1 md:flex-none bg-white text-indigo-700 font-bold px-4 py-3 rounded-xl text-sm shadow-lg hover:bg-indigo-50 transition flex items-center justify-center space-x-2">
-                    <i data-lucide="shopping-cart" class="w-4 h-4"></i>
-                    <span>+ Peminjaman Baru (Keranjang)</span>
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:flex gap-2.5 w-full lg:w-auto shrink-0">
+                <button onclick="openBatchLoanModal()" class="order-1 sm:order-2 min-h-[44px] bg-white text-indigo-700 font-bold px-4 py-2.5 rounded-xl text-xs sm:text-sm shadow-lg hover:bg-indigo-50 active:scale-[0.99] transition flex items-center justify-center space-x-2">
+                    <i data-lucide="shopping-cart" class="w-4 h-4 shrink-0"></i>
+                    <span>+ Peminjaman Baru</span>
+                </button>
+                <button onclick="openBookingModal()" class="order-2 sm:order-1 min-h-[44px] bg-indigo-900/45 hover:bg-indigo-900/65 border border-white/25 text-white font-bold px-4 py-2.5 rounded-xl text-xs sm:text-sm active:scale-[0.99] transition flex items-center justify-center space-x-2">
+                    <i data-lucide="calendar-clock" class="w-4 h-4 shrink-0"></i>
+                    <span>+ Booking Praktikum</span>
                 </button>
             </div>
         </div>
 
-        <!-- 4 REAL-TIME STATS CARDS GRID -->
-        <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 mb-7">
-            <div class="bg-white p-4 sm:p-5 rounded-2xl border border-slate-200 shadow-sm">
-                <div class="flex items-center justify-between mb-2.5">
-                    <span class="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Total Unit Alat</span>
-                    <div class="w-8 h-8 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center">
-                        <i data-lucide="boxes" class="w-4 h-4"></i>
+        <!-- 4 REAL-TIME STATS CARDS GRID (PROPORTIONAL ON 320px TO DESKTOP) -->
+        <div class="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-4 mb-5 sm:mb-7">
+            <div class="bg-white p-3.5 sm:p-5 rounded-2xl border border-slate-200 shadow-sm flex flex-col justify-between">
+                <div class="flex items-start justify-between gap-2 mb-2">
+                    <span class="text-[10px] sm:text-[11px] font-bold text-slate-500 uppercase tracking-wider leading-tight">Total Unit Alat</span>
+                    <div class="w-7 h-7 sm:w-8 sm:h-8 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center shrink-0">
+                        <i data-lucide="boxes" class="w-3.5 h-3.5 sm:w-4 sm:h-4"></i>
                     </div>
                 </div>
-                <div class="flex items-baseline space-x-2">
-                    <span id="stat-total" class="text-2xl sm:text-3xl font-extrabold text-slate-900">0</span>
-                    <span class="text-xs text-slate-500 font-medium">unit terdaftar</span>
+                <div class="flex items-baseline flex-wrap gap-x-1.5">
+                    <span id="stat-total" class="text-xl sm:text-3xl font-extrabold text-slate-900">0</span>
+                    <span class="text-[11px] sm:text-xs text-slate-500 font-medium">unit</span>
                 </div>
             </div>
 
-            <div class="bg-white p-4 sm:p-5 rounded-2xl border border-slate-200 shadow-sm">
-                <div class="flex items-center justify-between mb-2.5">
-                    <span class="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Tersedia di Rak</span>
-                    <div class="w-8 h-8 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center">
-                        <i data-lucide="check-circle-2" class="w-4 h-4"></i>
+            <div class="bg-white p-3.5 sm:p-5 rounded-2xl border border-slate-200 shadow-sm flex flex-col justify-between">
+                <div class="flex items-start justify-between gap-2 mb-2">
+                    <span class="text-[10px] sm:text-[11px] font-bold text-slate-500 uppercase tracking-wider leading-tight">Tersedia di Rak</span>
+                    <div class="w-7 h-7 sm:w-8 sm:h-8 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center shrink-0">
+                        <i data-lucide="check-circle-2" class="w-3.5 h-3.5 sm:w-4 sm:h-4"></i>
                     </div>
                 </div>
-                <div class="flex items-baseline space-x-2">
-                    <span id="stat-available" class="text-2xl sm:text-3xl font-extrabold text-emerald-600">0</span>
-                    <span class="text-xs text-slate-500 font-medium">siap pakai</span>
+                <div class="flex items-baseline flex-wrap gap-x-1.5">
+                    <span id="stat-available" class="text-xl sm:text-3xl font-extrabold text-emerald-600">0</span>
+                    <span class="text-[11px] sm:text-xs text-slate-500 font-medium">siap pakai</span>
                 </div>
             </div>
 
-            <div class="bg-white p-4 sm:p-5 rounded-2xl border border-slate-200 shadow-sm">
-                <div class="flex items-center justify-between mb-2.5">
-                    <span class="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Sedang Dipinjam</span>
-                    <div class="w-8 h-8 rounded-lg bg-amber-50 text-amber-600 flex items-center justify-center">
-                        <i data-lucide="clock" class="w-4 h-4"></i>
+            <div class="bg-white p-3.5 sm:p-5 rounded-2xl border border-slate-200 shadow-sm flex flex-col justify-between">
+                <div class="flex items-start justify-between gap-2 mb-2">
+                    <span class="text-[10px] sm:text-[11px] font-bold text-slate-500 uppercase tracking-wider leading-tight">Sedang Dipinjam</span>
+                    <div class="w-7 h-7 sm:w-8 sm:h-8 rounded-lg bg-amber-50 text-amber-600 flex items-center justify-center shrink-0">
+                        <i data-lucide="clock" class="w-3.5 h-3.5 sm:w-4 sm:h-4"></i>
                     </div>
                 </div>
-                <div class="flex items-baseline justify-between">
-                    <div class="flex items-baseline space-x-2">
-                        <span id="stat-borrowed" class="text-2xl sm:text-3xl font-extrabold text-amber-600">0</span>
-                        <span class="text-xs text-slate-500 font-medium">unit</span>
+                <div class="flex items-center flex-wrap gap-1.5">
+                    <div class="flex items-baseline space-x-1">
+                        <span id="stat-borrowed" class="text-xl sm:text-3xl font-extrabold text-amber-600">0</span>
+                        <span class="text-[11px] sm:text-xs text-slate-500 font-medium">unit</span>
                     </div>
                     <span id="stat-overdue-badge" class="hidden px-2 py-0.5 text-[10px] font-bold bg-rose-100 text-rose-700 rounded-full">0 Terlambat</span>
                 </div>
             </div>
 
-            <div class="bg-white p-4 sm:p-5 rounded-2xl border border-slate-200 shadow-sm">
-                <div class="flex items-center justify-between mb-2.5">
-                    <span class="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Rusak / Maintenance</span>
-                    <div class="w-8 h-8 rounded-lg bg-rose-50 text-rose-600 flex items-center justify-center">
-                        <i data-lucide="wrench" class="w-4 h-4"></i>
+            <div class="bg-white p-3.5 sm:p-5 rounded-2xl border border-slate-200 shadow-sm flex flex-col justify-between">
+                <div class="flex items-start justify-between gap-2 mb-2">
+                    <span class="text-[10px] sm:text-[11px] font-bold text-slate-500 uppercase tracking-wider leading-tight">Rusak / Karantina</span>
+                    <div class="w-7 h-7 sm:w-8 sm:h-8 rounded-lg bg-rose-50 text-rose-600 flex items-center justify-center shrink-0">
+                        <i data-lucide="wrench" class="w-3.5 h-3.5 sm:w-4 sm:h-4"></i>
                     </div>
                 </div>
-                <div class="flex items-baseline space-x-2">
-                    <span id="stat-damaged" class="text-2xl sm:text-3xl font-extrabold text-rose-600">0</span>
-                    <span class="text-xs text-rose-500 font-medium">unit karantina</span>
+                <div class="flex items-baseline flex-wrap gap-x-1.5">
+                    <span id="stat-damaged" class="text-xl sm:text-3xl font-extrabold text-rose-600">0</span>
+                    <span class="text-[11px] sm:text-xs text-rose-500 font-medium">karantina</span>
                 </div>
             </div>
         </div>
 
-        <!-- NAVIGATION TABS (3 CLEAN TABS) -->
-        <div class="flex border-b border-slate-200 mb-6 space-x-6 overflow-x-auto">
+        <!-- DESKTOP / TABLET NAVIGATION TABS (HIDDEN ON SMALL MOBILE, REPLACED BY BOTTOM BAR) -->
+        <div class="hidden sm:flex border-b border-slate-200 mb-6 space-x-6 overflow-x-auto no-scrollbar">
             <button onclick="switchTab('inventory')" id="tab-inventory" class="pb-3 text-sm font-bold border-b-2 border-indigo-600 text-indigo-600 whitespace-nowrap transition flex items-center space-x-2">
                 <i data-lucide="package" class="w-4 h-4"></i>
                 <span>Ketersediaan Alat (Real-Time)</span>
@@ -160,6 +317,11 @@
                 <span>Peminjaman Aktif & Terlambat</span>
                 <span id="badge-loans-count" class="px-2 py-0.5 text-[11px] bg-slate-200 text-slate-700 rounded-full">0</span>
             </button>
+            <button onclick="switchTab('bookings')" id="tab-bookings" class="pb-3 text-sm font-semibold border-b-2 border-transparent text-slate-500 hover:text-slate-900 whitespace-nowrap transition flex items-center space-x-2">
+                <i data-lucide="calendar-range" class="w-4 h-4"></i>
+                <span>Jadwal Praktikum (Booking)</span>
+                <span id="badge-bookings-count" class="px-2 py-0.5 text-[11px] bg-indigo-100 text-indigo-700 rounded-full">0</span>
+            </button>
             <button onclick="switchTab('history')" id="tab-history" class="pb-3 text-sm font-semibold border-b-2 border-transparent text-slate-500 hover:text-slate-900 whitespace-nowrap transition flex items-center space-x-2">
                 <i data-lucide="history" class="w-4 h-4"></i>
                 <span>Riwayat & Audit Log</span>
@@ -168,29 +330,29 @@
 
         <!-- TAB 1: KETERSEDIAAN ALAT -->
         <div id="section-inventory" class="space-y-4">
-            <!-- Search, Filter & Add Item Bar -->
-            <div class="flex flex-col md:flex-row justify-between items-stretch md:items-center gap-3 bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
+            <!-- Search, Filter & Add Item Bar (Mobile-First Grid) -->
+            <div class="flex flex-col lg:flex-row justify-between items-stretch lg:items-center gap-2.5 sm:gap-3 bg-white p-3.5 sm:p-4 rounded-2xl border border-slate-200 shadow-sm">
                 <div class="relative flex-grow">
-                    <i data-lucide="search" class="w-4 h-4 absolute left-3.5 top-3 text-slate-400"></i>
-                    <input type="text" id="search-input" onkeyup="renderInventory()" placeholder="Cari nama alat atau kode QR (misal: QR-LPT-01, Multimeter)..." class="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-600 focus:bg-white transition">
+                    <i data-lucide="search" class="w-4 h-4 absolute left-3.5 top-3.5 text-slate-400"></i>
+                    <input type="text" id="search-input" onkeyup="renderInventory()" placeholder="Cari nama alat atau kode QR..." class="w-full min-h-[42px] pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-600 focus:bg-white transition">
                 </div>
-                <div class="flex flex-wrap sm:flex-nowrap items-center gap-2">
-                    <select id="category-filter" onchange="renderInventory()" class="flex-1 sm:w-auto bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm text-slate-700 font-medium focus:outline-none focus:ring-2 focus:ring-indigo-600">
+                <div class="grid grid-cols-2 sm:flex items-center gap-2 shrink-0">
+                    <select id="category-filter" onchange="renderInventory()" class="w-full sm:w-auto min-h-[42px] bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs sm:text-sm text-slate-700 font-medium focus:outline-none focus:ring-2 focus:ring-indigo-600">
                         <option value="ALL">Semua Kategori</option>
                         <option value="Jaringan">Jaringan</option>
                         <option value="Elektronika">Elektronika</option>
                         <option value="Komputer/Laptop">Komputer/Laptop</option>
                         <option value="Alat Ukur">Alat Ukur</option>
                     </select>
-                    <button onclick="openModal('itemModal')" class="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-sm rounded-xl transition flex items-center justify-center space-x-1.5 shrink-0 shadow-sm">
-                        <i data-lucide="plus" class="w-4 h-4"></i>
-                        <span>+ Tambah Alat Baru</span>
+                    <button onclick="openModal('itemModal')" class="w-full sm:w-auto min-h-[42px] px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 active:scale-[0.99] text-white font-semibold text-xs sm:text-sm rounded-xl transition flex items-center justify-center space-x-1.5 shadow-sm">
+                        <i data-lucide="plus" class="w-4 h-4 shrink-0"></i>
+                        <span>Tambah Alat</span>
                     </button>
                 </div>
             </div>
 
             <!-- Dynamic Inventory Grid Cards -->
-            <div id="inventory-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            <div id="inventory-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5 sm:gap-4">
                 <!-- Diisi oleh JS -->
             </div>
         </div>
@@ -198,13 +360,13 @@
         <!-- TAB 2: PEMINJAMAN AKTIF & TERLAMBAT -->
         <div id="section-loans" class="space-y-4 hidden">
             <!-- Filter & Search Active Loans -->
-            <div class="flex flex-col sm:flex-row justify-between items-stretch sm:items-center gap-3 bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
+            <div class="flex flex-col sm:flex-row justify-between items-stretch sm:items-center gap-2.5 sm:gap-3 bg-white p-3.5 sm:p-4 rounded-2xl border border-slate-200 shadow-sm">
                 <div class="relative flex-grow">
-                    <i data-lucide="search" class="w-4 h-4 absolute left-3.5 top-3 text-slate-400"></i>
-                    <input type="text" id="loan-search-input" onkeyup="renderLoans()" placeholder="Cari nama peminjam, NIS/NIP, atau kode transaksi..." class="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-600 focus:bg-white transition">
+                    <i data-lucide="search" class="w-4 h-4 absolute left-3.5 top-3.5 text-slate-400"></i>
+                    <input type="text" id="loan-search-input" onkeyup="renderLoans()" placeholder="Cari nama peminjam, NIS/NIP, atau kode transaksi..." class="w-full min-h-[42px] pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-600 focus:bg-white transition">
                 </div>
-                <div class="flex items-center space-x-2">
-                    <select id="loan-status-filter" onchange="renderLoans()" class="w-full sm:w-auto bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm text-slate-700 font-medium focus:outline-none focus:ring-2 focus:ring-indigo-600">
+                <div class="w-full sm:w-auto shrink-0">
+                    <select id="loan-status-filter" onchange="renderLoans()" class="w-full sm:w-auto min-h-[42px] bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs sm:text-sm text-slate-700 font-medium focus:outline-none focus:ring-2 focus:ring-indigo-600">
                         <option value="ALL">Semua Peminjaman Aktif</option>
                         <option value="OVERDUE">Terlambat Saja (Overdue)</option>
                     </select>
@@ -212,9 +374,9 @@
             </div>
 
             <div class="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
-                <div class="px-5 py-3.5 border-b border-slate-200 flex justify-between items-center bg-slate-50/70">
-                    <h3 class="font-bold text-slate-900 text-sm">Transaksi Berlangsung</h3>
-                    <span id="loans-header-count" class="text-xs text-slate-500 font-semibold">0 transaksi</span>
+                <div class="px-4 sm:px-5 py-3.5 border-b border-slate-200 flex justify-between items-center bg-slate-50/70">
+                    <h3 class="font-bold text-slate-900 text-xs sm:text-sm">Transaksi Berlangsung</h3>
+                    <span id="loans-header-count" class="text-[11px] sm:text-xs text-slate-500 font-semibold">0 transaksi</span>
                 </div>
                 <div id="active-loans-list" class="divide-y divide-slate-100">
                     <!-- Diisi oleh JS -->
@@ -222,16 +384,40 @@
             </div>
         </div>
 
-        <!-- TAB 3: RIWAYAT & AUDIT LOG -->
-        <div id="section-history" class="space-y-6 hidden">
+        <!-- TAB 3: JADWAL BLOK PEMAKAIAN BENGKEL / PRAKTIKUM KELAS -->
+        <div id="section-bookings" class="space-y-4 hidden">
+            <div class="flex flex-col sm:flex-row justify-between items-stretch sm:items-center gap-3 bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
+                <div class="space-y-0.5">
+                    <h3 class="font-bold text-slate-900 text-sm">Jadwal Blok Pemakaian Bengkel & Praktikum Kelas</h3>
+                    <p class="text-xs text-slate-500 leading-relaxed">Alat yang dipesan guru pada jadwal praktikum otomatis dikunci agar tidak habis dipinjam perorangan.</p>
+                </div>
+                <button onclick="openBookingModal()" class="w-full sm:w-auto min-h-[42px] px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl transition shadow-sm flex items-center justify-center space-x-1.5 shrink-0">
+                    <i data-lucide="calendar-plus" class="w-4 h-4"></i>
+                    <span>+ Buat Jadwal Booking Kelas</span>
+                </button>
+            </div>
+
+            <div class="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
+                <div class="px-4 sm:px-5 py-3.5 border-b border-slate-200 flex justify-between items-center bg-slate-50/70">
+                    <h3 class="font-bold text-slate-900 text-xs sm:text-sm">Daftar Reservasi Praktikum Terdaftar</h3>
+                    <span id="bookings-header-count" class="text-[11px] sm:text-xs text-slate-500 font-semibold">0 jadwal</span>
+                </div>
+                <div id="bookings-list" class="divide-y divide-slate-100">
+                    <!-- Diisi oleh JS -->
+                </div>
+            </div>
+        </div>
+
+        <!-- TAB 4: RIWAYAT & AUDIT LOG -->
+        <div id="section-history" class="space-y-5 sm:space-y-6 hidden">
             <!-- Daftar Alat Rusak / Maintenance -->
             <div class="bg-white rounded-2xl border border-rose-200 overflow-hidden shadow-sm">
-                <div class="px-5 py-3.5 border-b border-rose-100 flex justify-between items-center bg-rose-50/60">
+                <div class="px-4 sm:px-5 py-3.5 border-b border-rose-100 flex justify-between items-center bg-rose-50/60 gap-2">
                     <div class="flex items-center space-x-2">
-                        <i data-lucide="alert-triangle" class="w-4 h-4 text-rose-600"></i>
-                        <h3 class="font-bold text-rose-900 text-sm">Daftar Alat Dalam Perbaikan / Karantina</h3>
+                        <i data-lucide="alert-triangle" class="w-4 h-4 text-rose-600 shrink-0"></i>
+                        <h3 class="font-bold text-rose-900 text-xs sm:text-sm">Alat Dalam Perbaikan / Karantina</h3>
                     </div>
-                    <span id="maintenance-count-badge" class="text-xs font-bold text-rose-700 bg-rose-100 px-2.5 py-0.5 rounded-full">0 unit</span>
+                    <span id="maintenance-count-badge" class="text-[11px] font-bold text-rose-700 bg-rose-100 px-2.5 py-0.5 rounded-full shrink-0">0 unit</span>
                 </div>
                 <div id="maintenance-list" class="divide-y divide-slate-100">
                     <!-- Diisi oleh JS -->
@@ -240,9 +426,9 @@
 
             <!-- Riwayat Pengembalian Selesai -->
             <div class="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
-                <div class="px-5 py-3.5 border-b border-slate-200 flex justify-between items-center bg-slate-50/70">
-                    <h3 class="font-bold text-slate-900 text-sm">Riwayat Transaksi Selesai & Audit Kondisi</h3>
-                    <span class="text-xs text-slate-500 font-medium">Log permanen di browser</span>
+                <div class="px-4 sm:px-5 py-3.5 border-b border-slate-200 flex flex-wrap justify-between items-center gap-1 bg-slate-50/70">
+                    <h3 class="font-bold text-slate-900 text-xs sm:text-sm">Riwayat Transaksi Selesai & Audit Kondisi</h3>
+                    <span class="text-[11px] text-slate-500 font-medium">Log lokal tersimpan</span>
                 </div>
                 <div id="history-loans-list" class="divide-y divide-slate-100">
                     <!-- Diisi oleh JS -->
@@ -252,27 +438,264 @@
 
     </main>
 
-    <!-- FOOTER -->
-    <footer class="bg-white border-t border-slate-200 py-4 text-center text-xs text-slate-500">
+    <!-- FOOTER (DESKTOP/TABLET) -->
+    <footer class="hidden sm:block bg-white border-t border-slate-200 py-4 text-center text-xs text-slate-500">
         SIPAKAT — Sistem Informasi Peminjaman Alat Bengkel TI • Anti-Human Error Prototype
     </footer>
+
+    <!-- MOBILE-FIRST BOTTOM NAVIGATION BAR (< 640px) -->
+    <nav aria-label="Navigasi Utama Mobile" class="sm:hidden fixed bottom-0 inset-x-0 z-30 bg-white/95 backdrop-blur border-t border-slate-200 pb-safe shadow-[0_-4px_16px_rgba(15,23,42,0.06)]">
+        <div class="grid grid-cols-4 h-16">
+            <button onclick="switchTab('inventory')" id="mob-tab-inventory" class="flex flex-col items-center justify-center space-y-1 text-indigo-600 font-bold transition">
+                <i data-lucide="package" class="w-5 h-5"></i>
+                <span class="text-[10px]">Alat</span>
+            </button>
+            <button onclick="switchTab('loans')" id="mob-tab-loans" class="relative flex flex-col items-center justify-center space-y-1 text-slate-500 font-semibold transition">
+                <div class="relative">
+                    <i data-lucide="clipboard-list" class="w-5 h-5"></i>
+                    <span id="mob-badge-loans-count" class="absolute -top-1.5 -right-2.5 min-w-[16px] h-4 px-1 text-[9px] font-extrabold bg-amber-500 text-white rounded-full flex items-center justify-center">0</span>
+                </div>
+                <span class="text-[10px]">Pinjam</span>
+            </button>
+            <button onclick="switchTab('bookings')" id="mob-tab-bookings" class="relative flex flex-col items-center justify-center space-y-1 text-slate-500 font-semibold transition">
+                <div class="relative">
+                    <i data-lucide="calendar-range" class="w-5 h-5"></i>
+                    <span id="mob-badge-bookings-count" class="absolute -top-1.5 -right-2.5 min-w-[16px] h-4 px-1 text-[9px] font-extrabold bg-indigo-600 text-white rounded-full flex items-center justify-center">0</span>
+                </div>
+                <span class="text-[10px]">Booking</span>
+            </button>
+            <button onclick="switchTab('history')" id="mob-tab-history" class="flex flex-col items-center justify-center space-y-1 text-slate-500 font-semibold transition">
+                <i data-lucide="history" class="w-5 h-5"></i>
+                <span class="text-[10px]">Riwayat</span>
+            </button>
+        </div>
+    </nav>
+
+    </div> <!-- END #app-wrapper -->
+
+    <!-- ===================================================================== -->
+    <!-- MODAL 11: TANDA TANGAN DIGITAL WAJIB (CANVAS SIGNATURE BAST)          -->
+    <!-- ===================================================================== -->
+    <div id="signatureBastModal" class="fixed inset-0 bg-slate-900/70 backdrop-blur-sm z-50 flex items-center justify-center p-3 sm:p-4 hidden overflow-y-auto">
+        <div class="bg-white rounded-2xl max-w-lg w-full p-4 sm:p-6 shadow-2xl border border-slate-100 my-auto max-h-[92vh] overflow-y-auto">
+            <div class="flex justify-between items-start gap-2 mb-3 pb-3 border-b border-slate-100">
+                <div class="flex items-center space-x-2.5">
+                    <div class="w-8 h-8 rounded-lg bg-indigo-100 text-indigo-600 flex items-center justify-center shrink-0">
+                        <i data-lucide="pen-tool" class="w-4 h-4"></i>
+                    </div>
+                    <div>
+                        <h3 class="font-bold text-slate-900 text-sm sm:text-base">Tanda Tangan Digital BAST</h3>
+                        <p class="text-[11px] text-slate-500">Peminjam wajib meneken sebagai bukti serah terima alat</p>
+                    </div>
+                </div>
+                <button onclick="closeModal('signatureBastModal')" class="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg">
+                    <i data-lucide="x" class="w-5 h-5"></i>
+                </button>
+            </div>
+
+            <!-- Ringkasan Serah Terima -->
+            <div id="sig-bast-summary" class="bg-slate-50 p-3.5 rounded-xl border border-slate-200 text-xs space-y-1.5 mb-4">
+                <!-- Diisi dinamis -->
+            </div>
+
+            <!-- Kotak Canvas Tanda Tangan -->
+            <div class="space-y-2 mb-4">
+                <div class="flex flex-wrap justify-between items-center gap-2">
+                    <label class="text-xs font-bold text-slate-700">Tanda Tangan Peminjam *</label>
+                    <button type="button" onclick="clearSignatureCanvas()" class="text-xs font-semibold text-rose-600 hover:text-rose-700 px-2 py-1 rounded-lg bg-rose-50 flex items-center space-x-1">
+                        <i data-lucide="eraser" class="w-3.5 h-3.5"></i>
+                        <span>Hapus / Ulangi</span>
+                    </button>
+                </div>
+                <div class="border-2 border-dashed border-indigo-300 rounded-2xl bg-indigo-50/20 overflow-hidden relative">
+                    <canvas id="signature-canvas" class="w-full h-40 sm:h-48 block"></canvas>
+                    <span id="sig-placeholder-text" class="pointer-events-none absolute inset-0 flex items-center justify-center text-center px-4 text-xs text-slate-400 font-medium">
+                        Goreskan jari (HP) atau mouse (Laptop) di area ini
+                    </span>
+                </div>
+                <p class="text-[11px] text-slate-500 leading-relaxed">
+                    Dengan menandatangani dokumen ini, peminjam menyatakan telah memeriksa dan menerima alat dalam kondisi <strong>baik & lengkap</strong> serta bertanggung jawab penuh mengembalikannya tepat waktu.
+                </p>
+            </div>
+
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                <button type="button" onclick="closeModal('signatureBastModal'); openModal('batchLoanModal');" class="order-2 sm:order-1 min-h-[44px] px-4 py-2.5 border border-slate-200 text-slate-700 font-semibold text-sm rounded-xl hover:bg-slate-50 transition">
+                    Kembali
+                </button>
+                <button type="button" onclick="finalizeLoanWithSignature()" class="order-1 sm:order-2 min-h-[44px] px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm rounded-xl shadow-md transition flex items-center justify-center space-x-1.5">
+                    <i data-lucide="check-circle-2" class="w-4 h-4 shrink-0"></i>
+                    <span>Sah-kan & Simpan BAST</span>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ===================================================================== -->
+    <!-- MODAL 12: PREVIEW & CETAK PDF BERITA ACARA SERAH TERIMA (BAST)        -->
+    <!-- ===================================================================== -->
+    <div id="bastPreviewModal" class="fixed inset-0 bg-slate-900/70 backdrop-blur-sm z-50 flex items-center justify-center p-3 sm:p-4 hidden overflow-y-auto">
+        <div class="bg-white rounded-2xl max-w-2xl w-full p-4 sm:p-6 shadow-2xl border border-slate-100 my-auto max-h-[92vh] overflow-y-auto">
+            <div class="flex justify-between items-center mb-4 pb-3 border-b border-slate-100 gap-2">
+                <div class="flex items-center space-x-2">
+                    <i data-lucide="file-check-2" class="w-5 h-5 text-indigo-600 shrink-0"></i>
+                    <h3 class="font-bold text-slate-900 text-sm sm:text-base">Berita Acara Serah Terima (BAST)</h3>
+                </div>
+                <button onclick="closeModal('bastPreviewModal')" class="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg">
+                    <i data-lucide="x" class="w-5 h-5"></i>
+                </button>
+            </div>
+
+            <!-- Dokumen Resmi BAST -->
+            <div id="bast-document-content" class="bg-white border border-slate-300 rounded-xl p-4 sm:p-7 text-slate-900 space-y-4 text-xs">
+                <!-- Diisi dinamis oleh JS -->
+            </div>
+
+            <div class="pt-4 mt-4 border-t border-slate-100 grid grid-cols-1 sm:flex gap-2.5 sm:justify-end">
+                <button type="button" onclick="printBastPdf()" class="order-1 sm:order-3 min-h-[42px] px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl shadow-md transition flex items-center justify-center space-x-1.5">
+                    <i data-lucide="printer" class="w-4 h-4"></i>
+                    <span>Cetak / Simpan PDF</span>
+                </button>
+                <button type="button" onclick="downloadBastHtmlFile()" class="order-2 sm:order-2 min-h-[42px] px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs rounded-xl transition flex items-center justify-center space-x-1.5">
+                    <i data-lucide="download" class="w-4 h-4"></i>
+                    <span>Unduh Arsip BAST</span>
+                </button>
+                <button type="button" onclick="closeModal('bastPreviewModal')" class="order-3 sm:order-1 min-h-[42px] px-4 py-2.5 border border-slate-200 text-slate-700 font-semibold text-xs rounded-xl hover:bg-slate-50">
+                    Tutup
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Area Khusus Print A4 -->
+    <div id="print-bast-area" class="hidden"></div>
+
+    <!-- ===================================================================== -->
+    <!-- MODAL 13: TAMBAH JADWAL BLOK PRAKTIKUM KELAS (SCHEDULE BOOKING)       -->
+    <!-- ===================================================================== -->
+    <div id="bookingModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-3 sm:p-4 hidden overflow-y-auto">
+        <div class="bg-white rounded-2xl max-w-xl w-full p-4 sm:p-6 shadow-2xl border border-slate-100 my-auto max-h-[92vh] overflow-y-auto">
+            <div class="flex justify-between items-start gap-2 mb-4 pb-3 border-b border-slate-100">
+                <div class="flex items-center space-x-2.5">
+                    <div class="w-8 h-8 rounded-lg bg-indigo-100 text-indigo-600 flex items-center justify-center shrink-0">
+                        <i data-lucide="calendar-clock" class="w-4 h-4"></i>
+                    </div>
+                    <div>
+                        <h3 class="font-bold text-slate-900 text-sm sm:text-base">Booking Jadwal Praktikum Kelas</h3>
+                        <p class="text-[11px] text-slate-500">Kunci stok alat praktikum agar tidak dipinjam perorangan</p>
+                    </div>
+                </div>
+                <button onclick="closeModal('bookingModal')" class="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg">
+                    <i data-lucide="x" class="w-5 h-5"></i>
+                </button>
+            </div>
+
+            <form onsubmit="handleBookingSubmit(event)" class="space-y-4">
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-700 mb-1">Nama Guru Pengampu *</label>
+                        <input type="text" id="book-teacher" required placeholder="Contoh: Hendra Wijaya, S.Kom" class="w-full min-h-[42px] px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-indigo-600">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-700 mb-1">Kelas Praktikum *</label>
+                        <input type="text" id="book-class" required placeholder="Contoh: XII TKJ 1" class="w-full min-h-[42px] px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-indigo-600">
+                    </div>
+                </div>
+
+                <div>
+                    <label class="block text-xs font-semibold text-slate-700 mb-1">Mata Pelajaran / Topik Praktikum *</label>
+                    <input type="text" id="book-subject" required placeholder="Contoh: Administrasi Infrastruktur Jaringan (Routing Dinamis)" class="w-full min-h-[42px] px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-indigo-600">
+                </div>
+
+                <!-- Mobile-First: 1 Kolom di HP agar Date/Time Picker tidak terpotong, 3 Kolom di Tablet/Desktop -->
+                <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-700 mb-1">Tanggal Praktikum *</label>
+                        <input type="date" id="book-date" required onchange="populateBookingItemSelect()" class="w-full min-h-[42px] px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-indigo-600">
+                    </div>
+                    <div class="grid grid-cols-2 sm:col-span-2 gap-2.5">
+                        <div>
+                            <label class="block text-xs font-semibold text-slate-700 mb-1">Jam Mulai *</label>
+                            <input type="time" id="book-start-time" value="08:00" required class="w-full min-h-[42px] px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-indigo-600">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-semibold text-slate-700 mb-1">Jam Selesai *</label>
+                            <input type="time" id="book-end-time" value="10:00" required class="w-full min-h-[42px] px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-indigo-600">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Pilihan Paket Alat untuk Praktikum -->
+                <div class="bg-slate-50 p-3.5 rounded-xl border border-slate-200 space-y-2.5">
+                    <span class="text-xs font-bold text-slate-700 block">Pilih Set Alat yang Dipesan (Dikunci):</span>
+                    <div class="flex flex-col sm:flex-row gap-2">
+                        <select id="book-item-select" class="w-full sm:flex-grow min-h-[42px] px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-medium focus:outline-none focus:ring-2 focus:ring-indigo-600">
+                            <!-- Diisi dinamis -->
+                        </select>
+                        <div class="flex gap-2 shrink-0">
+                            <input type="number" id="book-item-qty" min="1" value="2" class="w-20 min-h-[42px] px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-bold text-center">
+                            <button type="button" onclick="addBookingItemToCart()" class="flex-1 sm:flex-none min-h-[42px] px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs rounded-xl transition flex items-center justify-center space-x-1">
+                                <i data-lucide="plus" class="w-3.5 h-3.5"></i>
+                                <span>Tambah</span>
+                            </button>
+                        </div>
+                    </div>
+                    <div id="booking-cart-list" class="bg-white rounded-xl border border-slate-200 divide-y divide-slate-100 max-h-36 overflow-y-auto">
+                        <p class="text-xs text-slate-400 text-center py-3">Belum ada alat dipilih untuk jadwal ini.</p>
+                    </div>
+                </div>
+
+                <div class="pt-1 grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                    <button type="button" onclick="closeModal('bookingModal')" class="order-2 sm:order-1 min-h-[44px] px-4 py-2.5 border border-slate-200 text-slate-700 font-semibold text-sm rounded-xl hover:bg-slate-50">Batal</button>
+                    <button type="submit" class="order-1 sm:order-2 min-h-[44px] px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-sm rounded-xl shadow-md">Kunci Jadwal & Stok</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- ===================================================================== -->
+    <!-- MODAL 14: GANTI PIN / KATA SANDI PETUGAS                              -->
+    <!-- ===================================================================== -->
+    <div id="changePinModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-3.5 sm:p-4 hidden overflow-y-auto">
+        <div class="bg-white rounded-2xl max-w-sm w-full p-5 sm:p-6 shadow-2xl border border-slate-100 my-auto">
+            <div class="flex justify-between items-center mb-4 pb-3 border-b border-slate-100">
+                <h3 class="font-bold text-slate-900 text-base">Ubah PIN Keamanan Akun</h3>
+                <button onclick="closeModal('changePinModal')" class="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg">
+                    <i data-lucide="x" class="w-5 h-5"></i>
+                </button>
+            </div>
+            <form onsubmit="handleChangePinSubmit(event)" class="space-y-3.5">
+                <div>
+                    <label class="block text-xs font-semibold text-slate-700 mb-1">PIN / Sandi Lama *</label>
+                    <input type="password" id="old-pin-input" required class="w-full min-h-[42px] px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-600">
+                </div>
+                <div>
+                    <label class="block text-xs font-semibold text-slate-700 mb-1">PIN / Sandi Baru (Min. 6 Karakter) *</label>
+                    <input type="password" id="new-pin-input" minlength="6" required class="w-full min-h-[42px] px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-600">
+                </div>
+                <div class="pt-2 grid grid-cols-2 gap-2.5">
+                    <button type="button" onclick="closeModal('changePinModal')" class="min-h-[42px] px-4 py-2 border border-slate-200 text-slate-700 font-semibold text-xs rounded-xl hover:bg-slate-50">Batal</button>
+                    <button type="submit" class="min-h-[42px] px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl shadow">Simpan PIN</button>
+                </div>
+            </form>
+        </div>
+    </div>
 
     <!-- ===================================================================== -->
     <!-- MODAL 1: PEMINJAMAN BARU (BATCH LENDING + AUTO-COMPLETE + BLACKLIST)  -->
     <!-- ===================================================================== -->
     <div id="batchLoanModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-3 sm:p-4 hidden overflow-y-auto">
-        <div class="bg-white rounded-2xl max-w-2xl w-full p-5 sm:p-6 shadow-2xl border border-slate-100 my-auto max-h-[92vh] overflow-y-auto">
-            <div class="flex justify-between items-center mb-4 pb-3 border-b border-slate-100">
-                <div class="flex items-center space-x-2">
-                    <div class="w-8 h-8 rounded-lg bg-indigo-100 text-indigo-600 flex items-center justify-center">
+        <div class="bg-white rounded-2xl max-w-2xl w-full p-4 sm:p-6 shadow-2xl border border-slate-100 my-auto max-h-[92vh] overflow-y-auto">
+            <div class="flex justify-between items-start gap-2 mb-4 pb-3 border-b border-slate-100">
+                <div class="flex items-center space-x-2.5">
+                    <div class="w-8 h-8 rounded-lg bg-indigo-100 text-indigo-600 flex items-center justify-center shrink-0">
                         <i data-lucide="shopping-cart" class="w-4 h-4"></i>
                     </div>
                     <div>
-                        <h3 class="font-bold text-slate-900 text-base">Peminjaman Baru (Multi-Alat)</h3>
-                        <p class="text-[11px] text-slate-500">Ketik NIS/Nama untuk auto-complete & validasi blacklist otomatis</p>
+                        <h3 class="font-bold text-slate-900 text-sm sm:text-base">Peminjaman Baru (Multi-Alat)</h3>
+                        <p class="text-[11px] text-slate-500">Auto-complete identitas & validasi blacklist otomatis</p>
                     </div>
                 </div>
-                <button onclick="closeModal('batchLoanModal')" class="text-slate-400 hover:text-slate-600 p-1">
+                <button onclick="closeModal('batchLoanModal')" class="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg">
                     <i data-lucide="x" class="w-5 h-5"></i>
                 </button>
             </div>
@@ -288,54 +711,54 @@
 
             <form onsubmit="handleBatchLoanSubmit(event)" class="space-y-4">
                 <!-- Identitas Peminjam dengan Auto-Complete -->
-                <div class="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-3">
-                    <div class="flex justify-between items-center">
-                        <span class="text-xs font-bold text-slate-700 uppercase tracking-wider">1. Identitas Peminjam (Siswa / Guru)</span>
+                <div class="bg-slate-50 p-3.5 sm:p-4 rounded-xl border border-slate-200 space-y-3">
+                    <div class="flex flex-wrap justify-between items-center gap-1">
+                        <span class="text-xs font-bold text-slate-700 uppercase tracking-wider">1. Identitas Peminjam</span>
                         <span class="text-[11px] text-indigo-600 font-semibold">Auto-Complete Aktif</span>
                     </div>
 
                     <div class="relative">
                         <label class="block text-xs font-semibold text-slate-700 mb-1">Cari NIS / NIP atau Nama Peminjam *</label>
-                        <input type="text" id="loan-search-user" autocomplete="off" oninput="handleUserAutocomplete(this.value)" placeholder="Ketik NIS (misal: 2024001) atau Nama (misal: Budi, Andi)..." class="w-full px-3.5 py-2.5 bg-white border border-slate-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-600">
+                        <input type="text" id="loan-search-user" autocomplete="off" oninput="handleUserAutocomplete(this.value)" placeholder="Ketik NIS (2024001) atau Nama..." class="w-full min-h-[42px] px-3.5 py-2 bg-white border border-slate-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-600">
                         <!-- Dropdown hasil autocomplete -->
                         <div id="user-autocomplete-dropdown" class="hidden absolute left-0 right-0 mt-1 bg-white border border-slate-200 rounded-xl shadow-xl z-20 max-h-44 overflow-y-auto divide-y divide-slate-100">
                         </div>
                     </div>
 
-                    <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div class="grid grid-cols-1 sm:grid-cols-3 gap-2.5 sm:gap-3">
                         <div>
                             <label class="block text-[11px] font-semibold text-slate-600 mb-1">NIS / NIP *</label>
-                            <input type="text" id="loan-user-nis" required oninput="checkBorrowerBlacklist(this.value)" placeholder="2024001" class="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-indigo-600">
+                            <input type="text" id="loan-user-nis" required oninput="checkBorrowerBlacklist(this.value)" placeholder="2024001" class="w-full min-h-[40px] px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-indigo-600">
                         </div>
                         <div>
                             <label class="block text-[11px] font-semibold text-slate-600 mb-1">Nama Lengkap *</label>
-                            <input type="text" id="loan-user-name" required placeholder="Nama Lengkap" class="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-indigo-600">
+                            <input type="text" id="loan-user-name" required placeholder="Nama Lengkap" class="w-full min-h-[40px] px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-indigo-600">
                         </div>
                         <div>
                             <label class="block text-[11px] font-semibold text-slate-600 mb-1">No. WhatsApp *</label>
-                            <input type="tel" id="loan-user-phone" required placeholder="0812xxxxxxxx" class="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-indigo-600">
+                            <input type="tel" id="loan-user-phone" required placeholder="0812xxxxxxxx" class="w-full min-h-[40px] px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-indigo-600">
                         </div>
                     </div>
-                    <div class="flex items-center justify-between pt-1">
-                        <input type="text" id="loan-user-class" placeholder="Kelas / Jabatan (Contoh: XII TKJ 1 / Guru TI)" class="w-2/3 px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-indigo-600">
-                        <label class="inline-flex items-center space-x-1.5 text-[11px] text-slate-600 cursor-pointer">
-                            <input type="checkbox" id="save-new-user-checkbox" checked class="rounded text-indigo-600 focus:ring-indigo-500">
+                    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pt-1">
+                        <input type="text" id="loan-user-class" placeholder="Kelas / Jabatan (Contoh: XII TKJ 1 / Guru TI)" class="w-full sm:w-2/3 min-h-[38px] px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-indigo-600">
+                        <label class="inline-flex items-center space-x-2 text-[11px] text-slate-600 cursor-pointer py-1">
+                            <input type="checkbox" id="save-new-user-checkbox" checked class="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500">
                             <span>Simpan ke Master Siswa</span>
                         </label>
                     </div>
                 </div>
 
                 <!-- Keranjang Multi-Alat -->
-                <div class="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-3">
+                <div class="bg-slate-50 p-3.5 sm:p-4 rounded-xl border border-slate-200 space-y-3">
                     <span class="text-xs font-bold text-slate-700 uppercase tracking-wider block">2. Keranjang Alat yang Dipinjam</span>
                     
                     <div class="flex flex-col sm:flex-row gap-2">
-                        <select id="cart-item-select" onchange="updateCartMaxQty()" class="flex-grow px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-medium focus:outline-none focus:ring-2 focus:ring-indigo-600">
+                        <select id="cart-item-select" onchange="updateCartMaxQty()" class="w-full sm:flex-grow min-h-[42px] px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-medium focus:outline-none focus:ring-2 focus:ring-indigo-600">
                             <!-- Diisi dinamis -->
                         </select>
-                        <div class="flex gap-2">
-                            <input type="number" id="cart-item-qty" min="1" value="1" class="w-20 px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-bold text-center focus:outline-none focus:ring-2 focus:ring-indigo-600">
-                            <button type="button" onclick="addItemToCart()" class="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs rounded-xl transition flex items-center space-x-1 shrink-0">
+                        <div class="flex gap-2 shrink-0">
+                            <input type="number" id="cart-item-qty" min="1" value="1" class="w-20 min-h-[42px] px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-bold text-center focus:outline-none focus:ring-2 focus:ring-indigo-600">
+                            <button type="button" onclick="addItemToCart()" class="flex-1 sm:flex-none min-h-[42px] px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs rounded-xl transition flex items-center justify-center space-x-1">
                                 <i data-lucide="plus" class="w-3.5 h-3.5"></i>
                                 <span>Tambah</span>
                             </button>
@@ -348,24 +771,24 @@
                     </div>
                 </div>
 
-                <!-- Tanggal Pinjam & Tenggat -->
-                <div class="grid grid-cols-2 gap-3">
+                <!-- Tanggal Pinjam & Tenggat (1 kolom di HP kecil, 2 kolom di layar >= 640px) -->
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
                         <label class="block text-xs font-semibold text-slate-700 mb-1">Tanggal Pinjam *</label>
-                        <input type="date" id="loan-date" required class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-indigo-600">
+                        <input type="date" id="loan-date" required class="w-full min-h-[42px] px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-indigo-600">
                     </div>
                     <div>
                         <label class="block text-xs font-semibold text-slate-700 mb-1">Batas Pengembalian *</label>
-                        <input type="date" id="loan-due-date" required class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-indigo-600">
+                        <input type="date" id="loan-due-date" required class="w-full min-h-[42px] px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-indigo-600">
                     </div>
                 </div>
 
-                <div class="pt-2 flex space-x-3">
-                    <button type="button" onclick="closeModal('batchLoanModal')" class="flex-1 px-4 py-2.5 border border-slate-200 text-slate-700 font-semibold text-sm rounded-xl hover:bg-slate-50 transition">
+                <div class="pt-2 grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                    <button type="button" onclick="closeModal('batchLoanModal')" class="order-2 sm:order-1 min-h-[44px] px-4 py-2.5 border border-slate-200 text-slate-700 font-semibold text-sm rounded-xl hover:bg-slate-50 transition">
                         Batal
                     </button>
-                    <button type="submit" id="btn-submit-batch-loan" class="flex-1 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-300 disabled:cursor-not-allowed text-white font-bold text-sm rounded-xl shadow-md transition">
-                        Proses Peminjaman
+                    <button type="submit" id="btn-submit-batch-loan" class="order-1 sm:order-2 min-h-[44px] px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-300 disabled:cursor-not-allowed text-white font-bold text-sm rounded-xl shadow-md transition">
+                        Lanjut Tanda Tangan BAST
                     </button>
                 </div>
             </form>
@@ -375,46 +798,48 @@
     <!-- ===================================================================== -->
     <!-- MODAL 2: SIMULASI SCAN QR CODE / BARCODE                              -->
     <!-- ===================================================================== -->
-    <div id="scanQrModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden">
-        <div class="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-100">
+    <div id="scanQrModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-3.5 sm:p-4 hidden overflow-y-auto">
+        <div class="bg-white rounded-2xl max-w-md w-full p-4 sm:p-6 shadow-2xl border border-slate-100 my-auto max-h-[92vh] overflow-y-auto">
             <div class="flex justify-between items-center mb-4 pb-3 border-b border-slate-100">
                 <div class="flex items-center space-x-2">
-                    <i data-lucide="scan-line" class="w-5 h-5 text-indigo-600"></i>
-                    <h3 class="font-bold text-slate-900 text-base">Simulasi Scanner QR Code</h3>
+                    <i data-lucide="scan-line" class="w-5 h-5 text-indigo-600 shrink-0"></i>
+                    <h3 class="font-bold text-slate-900 text-sm sm:text-base">Simulasi Scanner QR Code</h3>
                 </div>
-                <button onclick="closeModal('scanQrModal')" class="text-slate-400 hover:text-slate-600 p-1">
+                <button onclick="closeModal('scanQrModal')" class="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg">
                     <i data-lucide="x" class="w-5 h-5"></i>
                 </button>
             </div>
 
             <!-- Viewfinder Kamera Simulasi -->
-            <div class="relative bg-slate-900 rounded-2xl h-44 mb-4 flex flex-col items-center justify-center overflow-hidden border-2 border-indigo-500/40">
-                <div class="w-32 h-32 border-2 border-indigo-400 rounded-xl relative flex items-center justify-center">
-                    <i data-lucide="qr-code" class="w-16 h-16 text-white/20"></i>
+            <div class="relative bg-slate-900 rounded-2xl h-40 sm:h-44 mb-4 flex flex-col items-center justify-center overflow-hidden border-2 border-indigo-500/40 px-4 text-center">
+                <div class="w-28 h-28 sm:w-32 sm:h-32 border-2 border-indigo-400 rounded-xl relative flex items-center justify-center">
+                    <i data-lucide="qr-code" class="w-14 h-14 sm:w-16 sm:h-16 text-white/20"></i>
                     <div class="absolute left-0 right-0 h-0.5 bg-emerald-400 shadow-[0_0_8px_#34d399] animate-scan"></div>
                 </div>
                 <span class="text-[11px] text-slate-300 mt-3 font-medium">Arahkan kamera ke stiker QR Alat atau Kartu Pelajar</span>
             </div>
 
-            <div class="space-y-3 text-xs">
+            <div class="space-y-3.5 text-xs">
                 <div>
                     <label class="block font-bold text-slate-700 mb-1.5">Simulasi Scan QR Alat (Langsung Cek / Pinjam):</label>
-                    <div class="flex gap-2">
-                        <select id="sim-qr-item-select" class="flex-grow px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium">
+                    <div class="flex flex-col sm:flex-row gap-2">
+                        <select id="sim-qr-item-select" class="w-full sm:flex-grow min-h-[40px] px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium">
                             <!-- Diisi JS -->
                         </select>
-                        <button onclick="simulateScanItem('detail')" class="px-3 py-2 bg-slate-200 hover:bg-slate-300 text-slate-800 font-semibold rounded-xl transition">Detail</button>
-                        <button onclick="simulateScanItem('cart')" class="px-3 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-xl transition">+ Pinjam</button>
+                        <div class="grid grid-cols-2 sm:flex gap-2 shrink-0">
+                            <button onclick="simulateScanItem('detail')" class="min-h-[40px] px-3 py-2 bg-slate-200 hover:bg-slate-300 text-slate-800 font-semibold rounded-xl transition">Detail</button>
+                            <button onclick="simulateScanItem('cart')" class="min-h-[40px] px-3 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-xl transition">+ Pinjam</button>
+                        </div>
                     </div>
                 </div>
 
-                <div class="pt-2 border-t border-slate-100">
+                <div class="pt-3 border-t border-slate-100">
                     <label class="block font-bold text-slate-700 mb-1.5">Simulasi Scan Kartu Pelajar (Auto-Isi Form Pinjam):</label>
-                    <div class="flex gap-2">
-                        <select id="sim-qr-user-select" class="flex-grow px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium">
+                    <div class="flex flex-col sm:flex-row gap-2">
+                        <select id="sim-qr-user-select" class="w-full sm:flex-grow min-h-[40px] px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium">
                             <!-- Diisi JS -->
                         </select>
-                        <button onclick="simulateScanUser()" class="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded-xl transition shrink-0">Scan Kartu</button>
+                        <button onclick="simulateScanUser()" class="w-full sm:w-auto min-h-[40px] px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded-xl transition shrink-0">Scan Kartu</button>
                     </div>
                 </div>
             </div>
@@ -424,11 +849,11 @@
     <!-- ===================================================================== -->
     <!-- MODAL 3: PENGEMBALIAN ALAT & CHECKLIST KONDISI FISIK                  -->
     <!-- ===================================================================== -->
-    <div id="returnModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden">
-        <div class="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-slate-100 max-h-[90vh] overflow-y-auto">
+    <div id="returnModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-3.5 sm:p-4 hidden overflow-y-auto">
+        <div class="bg-white rounded-2xl max-w-lg w-full p-4 sm:p-6 shadow-2xl border border-slate-100 my-auto max-h-[92vh] overflow-y-auto">
             <div class="flex justify-between items-center mb-4 pb-3 border-b border-slate-100">
-                <h3 class="font-bold text-slate-900 text-base">Checklist Pengembalian Alat</h3>
-                <button onclick="closeModal('returnModal')" class="text-slate-400 hover:text-slate-600 p-1">
+                <h3 class="font-bold text-slate-900 text-sm sm:text-base">Checklist Pengembalian Alat</h3>
+                <button onclick="closeModal('returnModal')" class="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg">
                     <i data-lucide="x" class="w-5 h-5"></i>
                 </button>
             </div>
@@ -449,14 +874,14 @@
 
                 <div>
                     <label class="block text-xs font-semibold text-slate-700 mb-1">Catatan Tambahan Petugas PLP (Opsional)</label>
-                    <input type="text" id="return-notes" placeholder="Contoh: Kabel lengkap, layar bersih..." class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-indigo-600">
+                    <input type="text" id="return-notes" placeholder="Contoh: Kabel lengkap, layar bersih..." class="w-full min-h-[40px] px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-indigo-600">
                 </div>
 
-                <div class="pt-2 flex space-x-3">
-                    <button type="button" onclick="closeModal('returnModal')" class="flex-1 px-4 py-2.5 border border-slate-200 text-slate-700 font-semibold text-sm rounded-xl hover:bg-slate-50 transition">
+                <div class="pt-2 grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                    <button type="button" onclick="closeModal('returnModal')" class="order-2 sm:order-1 min-h-[44px] px-4 py-2.5 border border-slate-200 text-slate-700 font-semibold text-sm rounded-xl hover:bg-slate-50 transition">
                         Batal
                     </button>
-                    <button type="submit" class="flex-1 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm rounded-xl shadow-md transition">
+                    <button type="submit" class="order-1 sm:order-2 min-h-[44px] px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm rounded-xl shadow-md transition">
                         Konfirmasi Pengembalian
                     </button>
                 </div>
@@ -467,24 +892,24 @@
     <!-- ===================================================================== -->
     <!-- MODAL 4: PERPANJANG WAKTU PEMINJAMAN (EXTEND DUE DATE)                -->
     <!-- ===================================================================== -->
-    <div id="extendModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden">
-        <div class="bg-white rounded-2xl max-w-sm w-full p-6 shadow-2xl border border-slate-100">
+    <div id="extendModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-3.5 sm:p-4 hidden overflow-y-auto">
+        <div class="bg-white rounded-2xl max-w-sm w-full p-5 sm:p-6 shadow-2xl border border-slate-100 my-auto">
             <div class="flex justify-between items-center mb-3 pb-2 border-b border-slate-100">
                 <h3 class="font-bold text-slate-900 text-base">Perpanjang Batas Waktu</h3>
-                <button onclick="closeModal('extendModal')" class="text-slate-400 hover:text-slate-600 p-1">
+                <button onclick="closeModal('extendModal')" class="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg">
                     <i data-lucide="x" class="w-5 h-5"></i>
                 </button>
             </div>
             <form onsubmit="handleExtendSubmit(event)" class="space-y-4">
                 <input type="hidden" id="extend-loan-id">
-                <p id="extend-loan-info" class="text-xs text-slate-600 bg-slate-50 p-3 rounded-xl border border-slate-200"></p>
+                <p id="extend-loan-info" class="text-xs text-slate-600 bg-slate-50 p-3 rounded-xl border border-slate-200 leading-relaxed"></p>
                 <div>
                     <label class="block text-xs font-semibold text-slate-700 mb-1">Tanggal Batas Kembali Baru *</label>
-                    <input type="date" id="extend-new-date" required class="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-indigo-600">
+                    <input type="date" id="extend-new-date" required class="w-full min-h-[42px] px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-indigo-600">
                 </div>
-                <div class="flex space-x-3 pt-1">
-                    <button type="button" onclick="closeModal('extendModal')" class="flex-1 px-4 py-2 border border-slate-200 text-slate-700 font-semibold text-xs rounded-xl hover:bg-slate-50">Batal</button>
-                    <button type="submit" class="flex-1 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs rounded-xl shadow">Simpan Perpanjangan</button>
+                <div class="grid grid-cols-2 gap-2.5 pt-1">
+                    <button type="button" onclick="closeModal('extendModal')" class="min-h-[42px] px-4 py-2 border border-slate-200 text-slate-700 font-semibold text-xs rounded-xl hover:bg-slate-50">Batal</button>
+                    <button type="submit" class="min-h-[42px] px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs rounded-xl shadow">Simpan</button>
                 </div>
             </form>
         </div>
@@ -493,24 +918,24 @@
     <!-- ===================================================================== -->
     <!-- MODAL 5: DETAIL ALAT, PEMINJAM AKTIF, AUDIT TRAIL & PERBAIKAN         -->
     <!-- ===================================================================== -->
-    <div id="itemDetailModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden">
-        <div class="bg-white rounded-2xl max-w-xl w-full p-6 shadow-2xl border border-slate-100 max-h-[90vh] overflow-y-auto">
-            <div class="flex justify-between items-start mb-4 pb-3 border-b border-slate-100">
+    <div id="itemDetailModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-3.5 sm:p-4 hidden overflow-y-auto">
+        <div class="bg-white rounded-2xl max-w-xl w-full p-4 sm:p-6 shadow-2xl border border-slate-100 my-auto max-h-[92vh] overflow-y-auto">
+            <div class="flex justify-between items-start gap-2 mb-4 pb-3 border-b border-slate-100">
                 <div>
-                    <div class="flex items-center space-x-2">
+                    <div class="flex flex-wrap items-center gap-1.5">
                         <span id="detail-item-category" class="text-[10px] font-bold px-2.5 py-0.5 bg-indigo-50 text-indigo-600 rounded-lg uppercase tracking-wider"></span>
                         <span id="detail-item-qr" class="text-[11px] font-mono font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded"></span>
                     </div>
-                    <h3 id="detail-item-name" class="font-bold text-slate-900 text-lg mt-1.5"></h3>
+                    <h3 id="detail-item-name" class="font-bold text-slate-900 text-base sm:text-lg mt-1.5"></h3>
                 </div>
-                <button onclick="closeModal('itemDetailModal')" class="text-slate-400 hover:text-slate-600 p-1">
+                <button onclick="closeModal('itemDetailModal')" class="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg shrink-0">
                     <i data-lucide="x" class="w-5 h-5"></i>
                 </button>
             </div>
             
             <div class="space-y-4 text-xs">
                 <!-- Rincian 4 Status Stok -->
-                <div class="grid grid-cols-4 gap-2 bg-slate-50 p-3 rounded-xl border border-slate-200 text-center">
+                <div class="grid grid-cols-4 gap-1.5 sm:gap-2 bg-slate-50 p-3 rounded-xl border border-slate-200 text-center">
                     <div>
                         <span class="text-slate-400 block text-[10px] uppercase">Total</span>
                         <strong id="detail-total" class="text-slate-900 text-sm">0</strong>
@@ -530,16 +955,16 @@
                 </div>
 
                 <!-- Aksi Cepat Selesai Perbaikan jika ada unit rusak -->
-                <div id="detail-repair-box" class="hidden p-3 bg-rose-50 border border-rose-200 rounded-xl flex items-center justify-between">
+                <div id="detail-repair-box" class="hidden p-3 bg-rose-50 border border-rose-200 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
                     <span class="text-rose-800 font-medium">Ada unit dalam karantina/perbaikan.</span>
-                    <button id="btn-repair-one" onclick="" class="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-lg text-xs transition shadow-sm">
+                    <button id="btn-repair-one" onclick="" class="w-full sm:w-auto min-h-[38px] px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-lg text-xs transition shadow-sm">
                         Selesai Perbaikan (+1 Tersedia)
                     </button>
                 </div>
 
                 <div>
                     <span class="text-slate-500 font-semibold block mb-1">Spesifikasi & Catatan Kondisi:</span>
-                    <p id="detail-item-desc" class="p-3 bg-slate-50 rounded-xl text-slate-700 border border-slate-200"></p>
+                    <p id="detail-item-desc" class="p-3 bg-slate-50 rounded-xl text-slate-700 border border-slate-200 leading-relaxed"></p>
                 </div>
 
                 <!-- Daftar Peminjam Aktif -->
@@ -555,17 +980,17 @@
                 </div>
             </div>
 
-            <div class="pt-4 mt-5 border-t border-slate-100 flex justify-between items-center">
-                <button id="btn-delete-item" onclick="" class="px-3.5 py-2 bg-rose-50 hover:bg-rose-100 text-rose-600 font-semibold rounded-xl text-xs transition flex items-center space-x-1.5">
+            <div class="pt-4 mt-5 border-t border-slate-100 flex flex-col sm:flex-row justify-between items-stretch sm:items-center gap-2.5">
+                <button id="btn-delete-item" onclick="" class="order-2 sm:order-1 min-h-[40px] px-3.5 py-2 bg-rose-50 hover:bg-rose-100 text-rose-600 font-semibold rounded-xl text-xs transition flex items-center justify-center space-x-1.5">
                     <i data-lucide="trash-2" class="w-4 h-4"></i>
                     <span>Hapus Alat</span>
                 </button>
-                <div class="flex space-x-2">
-                    <button id="btn-edit-item" onclick="" class="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-xl text-xs transition flex items-center space-x-1.5">
+                <div class="order-1 sm:order-2 grid grid-cols-2 sm:flex gap-2">
+                    <button id="btn-edit-item" onclick="" class="min-h-[40px] px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-xl text-xs transition flex items-center justify-center space-x-1.5">
                         <i data-lucide="edit-3" class="w-4 h-4"></i>
                         <span>Edit</span>
                     </button>
-                    <button onclick="closeModal('itemDetailModal')" class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-xl text-xs transition">
+                    <button onclick="closeModal('itemDetailModal')" class="min-h-[40px] px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-xl text-xs transition">
                         Tutup
                     </button>
                 </div>
@@ -576,23 +1001,23 @@
     <!-- ===================================================================== -->
     <!-- MODAL 6: TAMBAH ALAT BARU                                             -->
     <!-- ===================================================================== -->
-    <div id="itemModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden">
-        <div class="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-100">
+    <div id="itemModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-3.5 sm:p-4 hidden overflow-y-auto">
+        <div class="bg-white rounded-2xl max-w-md w-full p-4 sm:p-6 shadow-2xl border border-slate-100 my-auto max-h-[92vh] overflow-y-auto">
             <div class="flex justify-between items-center mb-4 pb-3 border-b border-slate-100">
                 <h3 class="font-bold text-slate-900 text-base">Tambah Alat Baru ke Inventaris</h3>
-                <button onclick="closeModal('itemModal')" class="text-slate-400 hover:text-slate-600 p-1">
+                <button onclick="closeModal('itemModal')" class="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg">
                     <i data-lucide="x" class="w-5 h-5"></i>
                 </button>
             </div>
             <form onsubmit="handleAddItemSubmit(event)" class="space-y-4">
                 <div>
                     <label class="block text-xs font-semibold text-slate-700 mb-1">Nama Alat *</label>
-                    <input type="text" id="new-item-name" required placeholder="Contoh: Oscilloscope Digital Rigol" class="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-600">
+                    <input type="text" id="new-item-name" required placeholder="Contoh: Oscilloscope Digital Rigol" class="w-full min-h-[42px] px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-600">
                 </div>
-                <div class="grid grid-cols-2 gap-3">
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
                         <label class="block text-xs font-semibold text-slate-700 mb-1">Kategori *</label>
-                        <select id="new-item-category" class="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-600">
+                        <select id="new-item-category" class="w-full min-h-[42px] px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-600">
                             <option value="Jaringan">Jaringan</option>
                             <option value="Elektronika">Elektronika</option>
                             <option value="Komputer/Laptop">Komputer/Laptop</option>
@@ -601,20 +1026,20 @@
                     </div>
                     <div>
                         <label class="block text-xs font-semibold text-slate-700 mb-1">Total Stok Unit *</label>
-                        <input type="number" id="new-item-stock" min="1" value="5" required class="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-600">
+                        <input type="number" id="new-item-stock" min="1" value="5" required class="w-full min-h-[42px] px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-600">
                     </div>
                 </div>
                 <div>
                     <label class="block text-xs font-semibold text-slate-700 mb-1">Kode QR / Inventaris (Opsional)</label>
-                    <input type="text" id="new-item-qr" placeholder="Kosongkan untuk generate otomatis" class="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-600">
+                    <input type="text" id="new-item-qr" placeholder="Kosongkan untuk generate otomatis" class="w-full min-h-[42px] px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-600">
                 </div>
                 <div>
                     <label class="block text-xs font-semibold text-slate-700 mb-1">Catatan Kondisi & Lokasi Rak</label>
-                    <input type="text" id="new-item-desc" placeholder="Contoh: Kondisi baru, Rak A2" class="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-600">
+                    <input type="text" id="new-item-desc" placeholder="Contoh: Kondisi baru, Rak A2" class="w-full min-h-[42px] px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-600">
                 </div>
-                <div class="pt-2 flex space-x-3">
-                    <button type="button" onclick="closeModal('itemModal')" class="flex-1 px-4 py-2.5 border border-slate-200 text-slate-700 font-semibold text-sm rounded-xl hover:bg-slate-50">Batal</button>
-                    <button type="submit" class="flex-1 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-sm rounded-xl shadow">Simpan Alat</button>
+                <div class="pt-2 grid grid-cols-2 gap-2.5">
+                    <button type="button" onclick="closeModal('itemModal')" class="min-h-[44px] px-4 py-2.5 border border-slate-200 text-slate-700 font-semibold text-sm rounded-xl hover:bg-slate-50">Batal</button>
+                    <button type="submit" class="min-h-[44px] px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-sm rounded-xl shadow">Simpan Alat</button>
                 </div>
             </form>
         </div>
@@ -623,11 +1048,11 @@
     <!-- ===================================================================== -->
     <!-- MODAL 7: EDIT DATA ALAT                                               -->
     <!-- ===================================================================== -->
-    <div id="editItemModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden">
-        <div class="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-100">
+    <div id="editItemModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-3.5 sm:p-4 hidden overflow-y-auto">
+        <div class="bg-white rounded-2xl max-w-md w-full p-4 sm:p-6 shadow-2xl border border-slate-100 my-auto max-h-[92vh] overflow-y-auto">
             <div class="flex justify-between items-center mb-4 pb-3 border-b border-slate-100">
                 <h3 class="font-bold text-slate-900 text-base">Edit Data Alat</h3>
-                <button onclick="closeModal('editItemModal')" class="text-slate-400 hover:text-slate-600 p-1">
+                <button onclick="closeModal('editItemModal')" class="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg">
                     <i data-lucide="x" class="w-5 h-5"></i>
                 </button>
             </div>
@@ -635,12 +1060,12 @@
                 <input type="hidden" id="edit-item-id">
                 <div>
                     <label class="block text-xs font-semibold text-slate-700 mb-1">Nama Alat *</label>
-                    <input type="text" id="edit-item-name" required class="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-600">
+                    <input type="text" id="edit-item-name" required class="w-full min-h-[42px] px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-600">
                 </div>
-                <div class="grid grid-cols-2 gap-3">
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
                         <label class="block text-xs font-semibold text-slate-700 mb-1">Kategori *</label>
-                        <select id="edit-item-category" class="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-600">
+                        <select id="edit-item-category" class="w-full min-h-[42px] px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-600">
                             <option value="Jaringan">Jaringan</option>
                             <option value="Elektronika">Elektronika</option>
                             <option value="Komputer/Laptop">Komputer/Laptop</option>
@@ -649,16 +1074,16 @@
                     </div>
                     <div>
                         <label class="block text-xs font-semibold text-slate-700 mb-1">Total Stok Unit *</label>
-                        <input type="number" id="edit-item-total-stock" min="1" required class="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-600">
+                        <input type="number" id="edit-item-total-stock" min="1" required class="w-full min-h-[42px] px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-600">
                     </div>
                 </div>
                 <div>
                     <label class="block text-xs font-semibold text-slate-700 mb-1">Catatan Kondisi & Lokasi Rak</label>
-                    <input type="text" id="edit-item-desc" class="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-600">
+                    <input type="text" id="edit-item-desc" class="w-full min-h-[42px] px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-600">
                 </div>
-                <div class="pt-2 flex space-x-3">
-                    <button type="button" onclick="closeModal('editItemModal')" class="flex-1 px-4 py-2.5 border border-slate-200 text-slate-700 font-semibold text-sm rounded-xl hover:bg-slate-50">Batal</button>
-                    <button type="submit" class="flex-1 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-sm rounded-xl shadow">Simpan Perubahan</button>
+                <div class="pt-2 grid grid-cols-2 gap-2.5">
+                    <button type="button" onclick="closeModal('editItemModal')" class="min-h-[44px] px-4 py-2.5 border border-slate-200 text-slate-700 font-semibold text-sm rounded-xl hover:bg-slate-50">Batal</button>
+                    <button type="submit" class="min-h-[44px] px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-sm rounded-xl shadow">Simpan</button>
                 </div>
             </form>
         </div>
@@ -667,26 +1092,26 @@
     <!-- ===================================================================== -->
     <!-- MODAL 8: BACKUP & RESTORE JSON                                        -->
     <!-- ===================================================================== -->
-    <div id="backupModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden">
-        <div class="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-100">
+    <div id="backupModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-3.5 sm:p-4 hidden overflow-y-auto">
+        <div class="bg-white rounded-2xl max-w-md w-full p-4 sm:p-6 shadow-2xl border border-slate-100 my-auto">
             <div class="flex justify-between items-center mb-4 pb-3 border-b border-slate-100">
                 <h3 class="font-bold text-slate-900 text-base">Backup & Restore Data (JSON)</h3>
-                <button onclick="closeModal('backupModal')" class="text-slate-400 hover:text-slate-600 p-1">
+                <button onclick="closeModal('backupModal')" class="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg">
                     <i data-lucide="x" class="w-5 h-5"></i>
                 </button>
             </div>
             <div class="space-y-4 text-xs">
                 <div class="p-4 bg-slate-50 rounded-xl border border-slate-200">
                     <h4 class="font-bold text-slate-800 mb-1">1. Unduh File Backup</h4>
-                    <p class="text-slate-500 mb-3">Simpan seluruh data inventaris, siswa, dan transaksi ke file <code>.json</code> agar aman saat presentasi.</p>
-                    <button onclick="downloadBackupJSON()" class="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl transition flex items-center justify-center space-x-2">
+                    <p class="text-slate-500 mb-3 leading-relaxed">Simpan seluruh data inventaris, siswa, jadwal, dan transaksi ke file <code>.json</code> agar aman saat presentasi.</p>
+                    <button onclick="downloadBackupJSON()" class="w-full min-h-[42px] py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl transition flex items-center justify-center space-x-2">
                         <i data-lucide="download" class="w-4 h-4"></i>
                         <span>Download Backup (.JSON)</span>
                     </button>
                 </div>
                 <div class="p-4 bg-slate-50 rounded-xl border border-slate-200">
                     <h4 class="font-bold text-slate-800 mb-1">2. Pulihkan Data (Restore)</h4>
-                    <p class="text-slate-500 mb-3">Pilih file backup <code>.json</code> sebelumnya untuk memulihkan database prototipe.</p>
+                    <p class="text-slate-500 mb-3 leading-relaxed">Pilih file backup <code>.json</code> sebelumnya untuk memulihkan database prototipe.</p>
                     <input type="file" id="restore-json-input" accept=".json" onchange="handleRestoreJSON(event)" class="block w-full text-xs text-slate-500 file:mr-3 file:py-2 file:px-3 file:rounded-xl file:border-0 file:text-xs file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100 cursor-pointer">
                 </div>
             </div>
@@ -696,48 +1121,321 @@
     <!-- ===================================================================== -->
     <!-- MODAL 9 & 10: KONFIRMASI HAPUS ALAT & RESET DEMO (CUSTOM MODAL)       -->
     <!-- ===================================================================== -->
-    <div id="deleteConfirmModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden">
-        <div class="bg-white rounded-2xl max-w-sm w-full p-6 shadow-2xl border border-slate-100 text-center">
+    <div id="deleteConfirmModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-3.5 sm:p-4 hidden">
+        <div class="bg-white rounded-2xl max-w-sm w-full p-5 sm:p-6 shadow-2xl border border-slate-100 text-center">
             <div class="w-12 h-12 rounded-full bg-rose-100 text-rose-600 flex items-center justify-center mx-auto mb-3">
                 <i data-lucide="trash-2" class="w-6 h-6"></i>
             </div>
             <h3 class="font-bold text-slate-900 text-base">Hapus Alat dari Inventaris?</h3>
-            <p id="delete-confirm-text" class="text-xs text-slate-500 mt-1 mb-5"></p>
-            <div class="flex space-x-3">
-                <button onclick="closeModal('deleteConfirmModal'); openModal('itemDetailModal');" class="flex-1 px-4 py-2.5 border border-slate-200 text-slate-700 font-semibold text-xs rounded-xl hover:bg-slate-50">Batal</button>
-                <button onclick="executeDeleteItem()" class="flex-1 px-4 py-2.5 bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs rounded-xl shadow">Ya, Hapus</button>
+            <p id="delete-confirm-text" class="text-xs text-slate-500 mt-1 mb-5 leading-relaxed"></p>
+            <div class="grid grid-cols-2 gap-2.5">
+                <button onclick="closeModal('deleteConfirmModal'); openModal('itemDetailModal');" class="min-h-[42px] px-4 py-2.5 border border-slate-200 text-slate-700 font-semibold text-xs rounded-xl hover:bg-slate-50">Batal</button>
+                <button onclick="executeDeleteItem()" class="min-h-[42px] px-4 py-2.5 bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs rounded-xl shadow">Ya, Hapus</button>
             </div>
         </div>
     </div>
 
-    <div id="resetModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden">
-        <div class="bg-white rounded-2xl max-w-sm w-full p-6 shadow-2xl border border-slate-100 text-center">
+    <div id="resetModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-3.5 sm:p-4 hidden">
+        <div class="bg-white rounded-2xl max-w-sm w-full p-5 sm:p-6 shadow-2xl border border-slate-100 text-center">
             <div class="w-12 h-12 rounded-full bg-rose-100 text-rose-600 flex items-center justify-center mx-auto mb-3">
                 <i data-lucide="rotate-ccw" class="w-6 h-6"></i>
             </div>
             <h3 class="font-bold text-slate-900 text-base">Reset Data Demo?</h3>
-            <p class="text-xs text-slate-500 mt-1 mb-5">Semua simulasi transaksi akan dikembalikan ke data awal bawaan demo.</p>
-            <div class="flex space-x-3">
-                <button onclick="closeModal('resetModal')" class="flex-1 px-4 py-2.5 border border-slate-200 text-slate-700 font-semibold text-xs rounded-xl hover:bg-slate-50">Batal</button>
-                <button onclick="resetDemoData()" class="flex-1 px-4 py-2.5 bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs rounded-xl shadow">Ya, Reset</button>
+            <p class="text-xs text-slate-500 mt-1 mb-5 leading-relaxed">Semua simulasi transaksi akan dikembalikan ke data awal bawaan demo.</p>
+            <div class="grid grid-cols-2 gap-2.5">
+                <button onclick="closeModal('resetModal')" class="min-h-[42px] px-4 py-2.5 border border-slate-200 text-slate-700 font-semibold text-xs rounded-xl hover:bg-slate-50">Batal</button>
+                <button onclick="resetDemoData()" class="min-h-[42px] px-4 py-2.5 bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs rounded-xl shadow">Ya, Reset</button>
             </div>
         </div>
     </div>
 
-    <!-- TOAST NOTIFICATION POPUP -->
-    <div id="toast" class="fixed bottom-5 right-5 bg-slate-900 text-white text-xs font-medium px-4 py-3 rounded-xl shadow-2xl flex items-center space-x-2.5 z-50 transform translate-y-24 opacity-0 transition-all duration-300 pointer-events-none max-w-sm">
+    <!-- TOAST NOTIFICATION POPUP (RESPONSIVE POSITION ABOVE MOBILE NAV) -->
+    <div id="toast" class="fixed bottom-20 sm:bottom-5 left-3.5 right-3.5 sm:left-auto sm:right-5 bg-slate-900 text-white text-xs font-medium px-4 py-3 rounded-xl shadow-2xl flex items-center space-x-2.5 z-50 transform translate-y-28 opacity-0 transition-all duration-300 pointer-events-none sm:max-w-sm">
         <i id="toast-icon" data-lucide="check-circle" class="w-4 h-4 text-emerald-400 shrink-0"></i>
-        <span id="toast-message">Berhasil diproses!</span>
+        <span id="toast-message" class="leading-snug">Berhasil diproses!</span>
     </div>
 
     <!-- ===================================================================== -->
     <!-- JAVASCRIPT ENGINE & BUSINESS LOGIC                                    -->
     <!-- ===================================================================== -->
     <script>
+        // Pengaman jika CDN Lucide Icons tidak termuat saat mode offline lokal
+        window.lucide = window.lucide || { createIcons: function() {} };
+
         // LocalStorage Keys
         const KEY_ITEMS = 'sipakat_pro_items_v3';
         const KEY_USERS = 'sipakat_pro_users_v3';
         const KEY_LOANS = 'sipakat_pro_loans_v3';
+        const KEY_BOOKINGS = 'sipakat_pro_bookings_v3';
+        const KEY_AUTH_ACCOUNTS = 'sipakat_auth_accounts_v1';
+        const KEY_AUTH_GUARD = 'sipakat_auth_guard_v1';
+        const KEY_SESSION = 'sipakat_active_session_v1';
+
+        // =====================================================================
+        // MODUL KEAMANAN LOGIN TANPA DATABASE (WEB CRYPTO SHA-256 + FALLBACK)
+        // =====================================================================
+        function sha256Fallback(asciiStr) {
+            const rightRotate = (value, amount) => (value >>> amount) | (value << (32 - amount));
+            const maxWord = Math.pow(2, 32);
+            let result = '';
+            const words = [];
+            const asciiBitLength = asciiStr.length * 8;
+
+            const hash = [
+                0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
+                0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19
+            ];
+            const k = [
+                0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+                0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+                0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+                0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+                0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+                0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+                0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+                0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2
+            ];
+
+            asciiStr += '\x80';
+            while (asciiStr.length % 64 - 56) asciiStr += '\x00';
+            for (let i = 0; i < asciiStr.length; i++) {
+                const j = asciiStr.charCodeAt(i);
+                words[i >> 2] |= j << ((3 - i) % 4) * 8;
+            }
+            words[words.length] = (asciiBitLength / maxWord) | 0;
+            words[words.length] = asciiBitLength;
+
+            for (let j = 0; j < words.length;) {
+                const w = words.slice(j, j += 16);
+                const oldHash = hash.slice(0);
+                for (let i = 0; i < 64; i++) {
+                    const w15 = w[i - 15], w2 = w[i - 2];
+                    const a = hash[0], e = hash[4];
+                    const temp1 = hash[7]
+                        + (rightRotate(e, 6) ^ rightRotate(e, 11) ^ rightRotate(e, 25))
+                        + ((e & hash[5]) ^ ((~e) & hash[6]))
+                        + k[i]
+                        + (w[i] = (i < 16) ? w[i] : (
+                            w[i - 16]
+                            + (rightRotate(w15, 7) ^ rightRotate(w15, 18) ^ (w15 >>> 3))
+                            + w[i - 7]
+                            + (rightRotate(w2, 17) ^ rightRotate(w2, 19) ^ (w2 >>> 10))
+                        ) | 0);
+                    const temp2 = (rightRotate(a, 2) ^ rightRotate(a, 13) ^ rightRotate(a, 22))
+                        + ((a & hash[1]) ^ (a & hash[2]) ^ (hash[1] & hash[2]));
+                    hash.unshift((temp1 + temp2) | 0);
+                    hash.pop();
+                    hash[4] = (hash[4] + temp1) | 0;
+                }
+                for (let i = 0; i < 8; i++) {
+                    hash[i] = (hash[i] + oldHash[i]) | 0;
+                }
+            }
+            for (let i = 0; i < 8; i++) {
+                for (let j = 3; j + 1; j--) {
+                    const b = (hash[i] >> (j * 8)) & 255;
+                    result += ((b < 16) ? '0' : '') + b.toString(16);
+                }
+            }
+            return result;
+        }
+
+        async function computeSaltedSha256(password, salt) {
+            const payload = `${salt}::SIPAKAT_TI_SEC::${password}`;
+            if (window.crypto && window.crypto.subtle) {
+                const encoder = new TextEncoder();
+                const data = encoder.encode(payload);
+                const hashBuffer = await window.crypto.subtle.digest('SHA-256', data);
+                const hashArray = Array.from(new Uint8Array(hashBuffer));
+                return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+            }
+            // Fallback otomatis jika dibuka via IP lokal non-HTTPS
+            return sha256Fallback(unescape(encodeURIComponent(payload)));
+        }
+
+        function generateRandomHex(bytesLen = 16) {
+            const arr = new Uint8Array(bytesLen);
+            if (window.crypto && window.crypto.getRandomValues) {
+                window.crypto.getRandomValues(arr);
+            } else {
+                for (let i = 0; i < bytesLen; i++) {
+                    arr[i] = Math.floor(Math.random() * 256);
+                }
+            }
+            return Array.from(arr).map(b => b.toString(16).padStart(2, '0')).join('');
+        }
+
+        async function initAuthAccounts() {
+            if (!localStorage.getItem(KEY_AUTH_ACCOUNTS)) {
+                const salt1 = generateRandomHex(16);
+                const salt2 = generateRandomHex(16);
+                const hash1 = await computeSaltedSha256('123456', salt1);
+                const hash2 = await computeSaltedSha256('guru2026', salt2);
+
+                const defaultAccounts = [
+                    { username: 'plp_budi', name: 'Budi Santoso, S.T.', role: 'Petugas PLP Bengkel TI', salt: salt1, hash: hash1 },
+                    { username: 'guru_hendra', name: 'Hendra Wijaya, S.Kom', role: 'Guru Produktif TI', salt: salt2, hash: hash2 }
+                ];
+                localStorage.setItem(KEY_AUTH_ACCOUNTS, JSON.stringify(defaultAccounts));
+            }
+        }
+
+        function getActiveSession() {
+            try {
+                const raw = sessionStorage.getItem(KEY_SESSION);
+                if (!raw) return null;
+                const session = JSON.parse(raw);
+                if (!session.token || Date.now() > session.expiresAt) {
+                    sessionStorage.removeItem(KEY_SESSION);
+                    return null;
+                }
+                return session;
+            } catch (e) {
+                return null;
+            }
+        }
+
+        function fillDemoLogin(user, pass) {
+            document.getElementById('login-username').value = user;
+            document.getElementById('login-password').value = pass;
+        }
+
+        function toggleLoginPasswordVisibility() {
+            const inp = document.getElementById('login-password');
+            const icon = document.getElementById('login-eye-icon');
+            if (inp.type === 'password') {
+                inp.type = 'text';
+                icon.setAttribute('data-lucide', 'eye-off');
+            } else {
+                inp.type = 'password';
+                icon.setAttribute('data-lucide', 'eye');
+            }
+            lucide.createIcons();
+        }
+
+        function checkLoginLockoutStatus() {
+            const guard = JSON.parse(localStorage.getItem(KEY_AUTH_GUARD) || '{"attempts":0,"lockUntil":0}');
+            const box = document.getElementById('login-lockout-box');
+            const text = document.getElementById('login-lockout-text');
+            const btn = document.getElementById('btn-login-submit');
+
+            if (guard.lockUntil && Date.now() < guard.lockUntil) {
+                const secLeft = Math.ceil((guard.lockUntil - Date.now()) / 1000);
+                box.classList.remove('hidden');
+                text.textContent = `Terlalu banyak percobaan gagal. Coba lagi dalam ${secLeft} detik.`;
+                btn.disabled = true;
+                return true;
+            } else {
+                box.classList.add('hidden');
+                btn.disabled = false;
+                return false;
+            }
+        }
+
+        async function handleLoginSubmit(e) {
+            e.preventDefault();
+            if (checkLoginLockoutStatus()) return;
+
+            const username = document.getElementById('login-username').value.trim().toLowerCase();
+            const password = document.getElementById('login-password').value;
+            const accounts = JSON.parse(localStorage.getItem(KEY_AUTH_ACCOUNTS) || '[]');
+            const guard = JSON.parse(localStorage.getItem(KEY_AUTH_GUARD) || '{"attempts":0,"lockUntil":0}');
+
+            const account = accounts.find(a => a.username.toLowerCase() === username);
+            let isValid = false;
+            if (account) {
+                const candidateHash = await computeSaltedSha256(password, account.salt);
+                isValid = (candidateHash === account.hash);
+            }
+
+            if (!isValid) {
+                guard.attempts = (guard.attempts || 0) + 1;
+                if (guard.attempts >= 3) {
+                    guard.lockUntil = Date.now() + 30000; // Kunci 30 detik
+                    guard.attempts = 0;
+                    localStorage.setItem(KEY_AUTH_GUARD, JSON.stringify(guard));
+                    checkLoginLockoutStatus();
+                    const timer = setInterval(() => {
+                        if (!checkLoginLockoutStatus()) clearInterval(timer);
+                    }, 1000);
+                    showToast('Login dikunci 30 detik karena 3x gagal!', 'error');
+                } else {
+                    localStorage.setItem(KEY_AUTH_GUARD, JSON.stringify(guard));
+                    showToast(`Username atau PIN salah! Sisa percobaan: ${3 - guard.attempts}x`, 'error');
+                }
+                return;
+            }
+
+            // Reset guard & buat Session Token terenkripsi di sessionStorage
+            localStorage.removeItem(KEY_AUTH_GUARD);
+            const sessionPayload = {
+                token: generateRandomHex(32),
+                username: account.username,
+                name: account.name,
+                role: account.role,
+                loginAt: new Date().toISOString(),
+                expiresAt: Date.now() + (60 * 60 * 1000) // 60 Menit
+            };
+            sessionStorage.setItem(KEY_SESSION, JSON.stringify(sessionPayload));
+            document.getElementById('login-password').value = '';
+            enterAuthenticatedApp(sessionPayload);
+            showToast(`Selamat datang, ${account.name}!`);
+        }
+
+        function enterAuthenticatedApp(session) {
+            document.getElementById('login-screen').classList.add('hidden');
+            document.getElementById('app-wrapper').classList.remove('hidden');
+            document.getElementById('active-officer-badge').textContent = `${session.role}: ${session.name}`;
+            initApp();
+        }
+
+        function logoutUser() {
+            sessionStorage.removeItem(KEY_SESSION);
+            closeMobileUtilityMenu();
+            document.getElementById('app-wrapper').classList.add('hidden');
+            document.getElementById('login-screen').classList.remove('hidden');
+            lucide.createIcons();
+            showToast('Sesi ditutup dengan aman.');
+        }
+
+        async function handleChangePinSubmit(e) {
+            e.preventDefault();
+            const session = getActiveSession();
+            if (!session) { logoutUser(); return; }
+
+            const oldPin = document.getElementById('old-pin-input').value;
+            const newPin = document.getElementById('new-pin-input').value;
+            const accounts = JSON.parse(localStorage.getItem(KEY_AUTH_ACCOUNTS) || '[]');
+            const idx = accounts.findIndex(a => a.username === session.username);
+            if (idx === -1) return;
+
+            const oldHash = await computeSaltedSha256(oldPin, accounts[idx].salt);
+            if (oldHash !== accounts[idx].hash) {
+                showToast('PIN lama tidak sesuai!', 'error');
+                return;
+            }
+
+            const newSalt = generateRandomHex(16);
+            const newHash = await computeSaltedSha256(newPin, newSalt);
+            accounts[idx].salt = newSalt;
+            accounts[idx].hash = newHash;
+            localStorage.setItem(KEY_AUTH_ACCOUNTS, JSON.stringify(accounts));
+
+            e.target.reset();
+            closeModal('changePinModal');
+            showToast('PIN keamanan berhasil diperbarui dengan enkripsi SHA-256 baru!');
+        }
+
+        // Helper Menu Utilitas Mobile
+        function toggleMobileUtilityMenu() {
+            const menu = document.getElementById('mobile-utility-menu');
+            menu.classList.toggle('hidden');
+        }
+
+        function closeMobileUtilityMenu() {
+            const menu = document.getElementById('mobile-utility-menu');
+            if (menu) menu.classList.add('hidden');
+        }
 
         // Helper Tanggal Relatif
         function getRelativeDate(daysOffset) {
@@ -808,7 +1506,39 @@
                 dueDate: getRelativeDate(-4),
                 status: 'completed',
                 returnDate: getRelativeDate(-4),
-                notes: 'Digunakan untuk praktik kelas XI.'
+                notes: 'Digunakan untuk praktik kelas XI.',
+                signatureData: null
+            }
+        ];
+
+        // Seed Jadwal Blok Praktikum Kelas (Schedule Booking)
+        const seedBookings = [
+            {
+                id: 'BKG-301',
+                teacherName: 'Hendra Wijaya, S.Kom',
+                className: 'XII TKJ 1',
+                subject: 'Praktikum Konfigurasi VLAN & Trunking',
+                date: getRelativeDate(0), // Hari ini (Sedang berlangsung -> otomatis kunci stok!)
+                startTime: '08:00',
+                endTime: '11:30',
+                status: 'active',
+                items: [
+                    { itemId: 'QR-LPT-01', itemName: 'Laptop Praktikum Lenovo ThinkPad', qty: 4 },
+                    { itemId: 'QR-NET-02', itemName: 'Tang Crimping RJ45 Heavy Duty', qty: 5 }
+                ]
+            },
+            {
+                id: 'BKG-302',
+                teacherName: 'Hendra Wijaya, S.Kom',
+                className: 'XI RPL 1',
+                subject: 'Pengukuran Tegangan & Rangkaian Dasar',
+                date: getRelativeDate(2), // 2 hari ke depan
+                startTime: '08:00',
+                endTime: '10:00',
+                status: 'scheduled',
+                items: [
+                    { itemId: 'QR-UKR-03', itemName: 'Multimeter Digital Fluke 117', qty: 4 }
+                ]
             }
         ];
 
@@ -816,7 +1546,11 @@
         let items = [];
         let users = [];
         let loans = [];
+        let bookings = [];
         let loanCart = []; // Keranjang Batch Lending
+        let bookingCart = []; // Keranjang Alat Jadwal Praktikum
+        let pendingLoanPayload = null; // Data peminjaman menunggu tanda tangan digital BAST
+        let currentBastLoanId = null; // ID transaksi yang sedang dilihat di modal BAST
         let itemToDeleteId = null;
 
         // 1. Inisialisasi Data
@@ -824,15 +1558,18 @@
             const sItems = localStorage.getItem(KEY_ITEMS);
             const sUsers = localStorage.getItem(KEY_USERS);
             const sLoans = localStorage.getItem(KEY_LOANS);
+            const sBookings = localStorage.getItem(KEY_BOOKINGS);
 
             if (sItems && sUsers && sLoans) {
                 items = JSON.parse(sItems);
                 users = JSON.parse(sUsers);
                 loans = JSON.parse(sLoans);
+                bookings = sBookings ? JSON.parse(sBookings) : JSON.parse(JSON.stringify(seedBookings));
             } else {
                 items = JSON.parse(JSON.stringify(seedItems));
                 users = JSON.parse(JSON.stringify(seedUsers));
                 loans = JSON.parse(JSON.stringify(seedLoans));
+                bookings = JSON.parse(JSON.stringify(seedBookings));
                 saveAllData();
             }
             refreshUI();
@@ -842,12 +1579,13 @@
             localStorage.setItem(KEY_ITEMS, JSON.stringify(items));
             localStorage.setItem(KEY_USERS, JSON.stringify(users));
             localStorage.setItem(KEY_LOANS, JSON.stringify(loans));
+            localStorage.setItem(KEY_BOOKINGS, JSON.stringify(bookings));
         }
 
-        // Kalkulasi Stok Real-Time (Tersedia = Total - Dipinjam - Rusak)
-        function getStockBreakdown(itemId) {
+        // Kalkulasi Stok Real-Time (Tersedia = Total - Dipinjam - Rusak - Terkunci Jadwal Praktikum)
+        function getStockBreakdown(itemId, targetStartDate = null, targetEndDate = null) {
             const item = items.find(i => i.id === itemId);
-            if (!item) return { total: 0, borrowed: 0, damaged: 0, available: 0 };
+            if (!item) return { total: 0, borrowed: 0, damaged: 0, booked: 0, available: 0 };
 
             let borrowed = 0;
             loans.filter(l => l.status === 'active').forEach(loan => {
@@ -856,11 +1594,29 @@
                 });
             });
 
+            // Hitung stok terkunci oleh Jadwal Praktikum (Schedule Booking)
+            let booked = 0;
+            const todayStr = getRelativeDate(0);
+            bookings.forEach(b => {
+                if (b.status === 'completed' || b.status === 'cancelled') return;
+                let isLocked = false;
+                if (targetStartDate && targetEndDate) {
+                    isLocked = (b.status === 'active') || (b.date >= targetStartDate && b.date <= targetEndDate);
+                } else {
+                    isLocked = (b.status === 'active') || (b.date === todayStr);
+                }
+                if (isLocked) {
+                    b.items.forEach(bi => {
+                        if (bi.itemId === itemId) booked += parseInt(bi.qty);
+                    });
+                }
+            });
+
             const total = parseInt(item.totalStock) || 0;
             const damaged = parseInt(item.damagedStock) || 0;
-            const available = Math.max(0, total - borrowed - damaged);
+            const available = Math.max(0, total - borrowed - damaged - booked);
 
-            return { total, borrowed, damaged, available };
+            return { total, borrowed, damaged, booked, available };
         }
 
         // Cek Keterlambatan (Overdue Days)
@@ -883,6 +1639,7 @@
             updateDashboardStats();
             renderInventory();
             renderLoans();
+            renderBookings();
             renderHistoryAndMaintenance();
             lucide.createIcons();
         }
@@ -908,6 +1665,16 @@
             document.getElementById('stat-damaged').textContent = sumDamaged;
             document.getElementById('badge-loans-count').textContent = activeLoans.length;
 
+            const mobLoansBadge = document.getElementById('mob-badge-loans-count');
+            if (mobLoansBadge) mobLoansBadge.textContent = activeLoans.length;
+
+            const activeBookingsCount = bookings.filter(b => b.status === 'active' || b.status === 'scheduled').length;
+            const badgeBkg = document.getElementById('badge-bookings-count');
+            if (badgeBkg) badgeBkg.textContent = activeBookingsCount;
+
+            const mobBkgBadge = document.getElementById('mob-badge-bookings-count');
+            if (mobBkgBadge) mobBkgBadge.textContent = activeBookingsCount;
+
             const overdueBadge = document.getElementById('stat-overdue-badge');
             if (overdueCount > 0) {
                 overdueBadge.textContent = `${overdueCount} Terlambat`;
@@ -918,7 +1685,7 @@
 
             const bannerEl = document.getElementById('banner-summary');
             if (overdueCount > 0) {
-                bannerEl.innerHTML = `Peringatan: Terdapat <strong class="underline text-amber-200">${overdueCount} peminjaman terlambat</strong> (Auto-Blacklist aktif untuk peminjam terkait) & ${sumDamaged} unit alat dalam karantina.`;
+                bannerEl.innerHTML = `Peringatan: Terdapat <strong class="underline text-amber-200">${overdueCount} peminjaman terlambat</strong> (Auto-Blacklist aktif) & ${sumDamaged} unit alat dalam karantina.`;
             } else {
                 bannerEl.innerHTML = `Operasional lancar! ${activeLoans.length} transaksi aktif berjalan normal dan ${sumAvail} unit siap digunakan.`;
             }
@@ -938,7 +1705,7 @@
 
             if (filtered.length === 0) {
                 grid.innerHTML = `
-                    <div class="col-span-full bg-white p-10 rounded-2xl border border-slate-200 text-center">
+                    <div class="col-span-full bg-white p-8 sm:p-10 rounded-2xl border border-slate-200 text-center">
                         <p class="text-sm font-bold text-slate-700">Alat tidak ditemukan</p>
                         <p class="text-xs text-slate-400 mt-1">Ubah kata kunci pencarian atau tambahkan alat baru.</p>
                     </div>`;
@@ -951,37 +1718,38 @@
                 const dotColor = st.available > 2 ? 'bg-emerald-500' : (st.available > 0 ? 'bg-amber-500' : 'bg-rose-500');
 
                 return `
-                <div class="bg-white p-5 rounded-2xl border border-slate-200 hover:border-indigo-300 transition shadow-sm flex flex-col justify-between">
+                <div class="bg-white p-4 sm:p-5 rounded-2xl border border-slate-200 hover:border-indigo-300 transition shadow-sm flex flex-col justify-between">
                     <div>
-                        <div class="flex justify-between items-start mb-2.5">
-                            <div class="flex items-center space-x-1.5">
+                        <div class="flex justify-between items-start gap-2 mb-2.5">
+                            <div class="flex flex-wrap items-center gap-1.5">
                                 <span class="text-[10px] font-bold px-2.5 py-0.5 bg-indigo-50 text-indigo-700 rounded-lg uppercase">${item.category}</span>
                                 <span class="text-[10px] font-mono font-semibold text-slate-500 bg-slate-100 px-2 py-0.5 rounded">${item.id}</span>
                             </div>
-                            <span class="flex h-2.5 w-2.5 relative">
+                            <span class="flex h-2.5 w-2.5 relative shrink-0 mt-1">
                                 ${isAvail ? `<span class="animate-ping absolute inline-flex h-full w-full rounded-full ${dotColor} opacity-75"></span>` : ''}
                                 <span class="relative inline-flex rounded-full h-2.5 w-2.5 ${dotColor}"></span>
                             </span>
                         </div>
-                        <h3 class="font-bold text-slate-900 text-base leading-snug">${item.name}</h3>
-                        <p class="text-xs text-slate-500 mt-1.5 mb-4 line-clamp-2">${item.desc || 'Siap digunakan untuk praktikum.'}</p>
+                        <h3 class="font-bold text-slate-900 text-sm sm:text-base leading-snug">${item.name}</h3>
+                        <p class="text-xs text-slate-500 mt-1.5 mb-3.5 line-clamp-2 leading-relaxed">${item.desc || 'Siap digunakan untuk praktikum.'}</p>
                     </div>
 
                     <div>
-                        <!-- Mini Breakdown Bar -->
-                        <div class="flex items-center justify-between text-[11px] bg-slate-50 px-3 py-2 rounded-xl border border-slate-100 mb-3">
+                        <!-- Mini Breakdown Bar (Proportional on All Widths) -->
+                        <div class="flex flex-wrap items-center justify-between gap-1.5 text-[11px] bg-slate-50 px-3 py-2 rounded-xl border border-slate-100 mb-3">
                             <span class="text-emerald-700 font-bold">Tersedia: ${st.available}</span>
                             <span class="text-amber-600 font-semibold">Dipinjam: ${st.borrowed}</span>
+                            ${st.booked > 0 ? `<span class="text-indigo-600 font-bold" title="Terkunci Jadwal Praktikum">Booking: ${st.booked}</span>` : ''}
                             ${st.damaged > 0 ? `<span class="text-rose-600 font-bold">Rusak: ${st.damaged}</span>` : `<span class="text-slate-400">Total: ${st.total}</span>`}
                         </div>
 
-                        <div class="flex items-center justify-between gap-2">
-                            <button onclick="openItemDetail('${item.id}')" class="flex-1 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl transition flex items-center justify-center space-x-1">
-                                <i data-lucide="info" class="w-3.5 h-3.5"></i>
+                        <div class="grid grid-cols-2 gap-2">
+                            <button onclick="openItemDetail('${item.id}')" class="min-h-[40px] py-2 bg-slate-100 hover:bg-slate-200 active:scale-[0.99] text-slate-700 text-xs font-bold rounded-xl transition flex items-center justify-center space-x-1.5">
+                                <i data-lucide="info" class="w-3.5 h-3.5 shrink-0"></i>
                                 <span>Detail</span>
                             </button>
-                            <button onclick="openBatchLoanModal('${item.id}')" ${!isAvail ? 'disabled' : ''} class="flex-1 py-2 ${isAvail ? 'bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm' : 'bg-slate-100 text-slate-400 cursor-not-allowed'} text-xs font-bold rounded-xl transition flex items-center justify-center space-x-1">
-                                <i data-lucide="plus-circle" class="w-3.5 h-3.5"></i>
+                            <button onclick="openBatchLoanModal('${item.id}')" ${!isAvail ? 'disabled' : ''} class="min-h-[40px] py-2 ${isAvail ? 'bg-indigo-600 hover:bg-indigo-700 active:scale-[0.99] text-white shadow-sm' : 'bg-slate-100 text-slate-400 cursor-not-allowed'} text-xs font-bold rounded-xl transition flex items-center justify-center space-x-1.5">
+                                <i data-lucide="plus-circle" class="w-3.5 h-3.5 shrink-0"></i>
                                 <span>${isAvail ? 'Pinjamkan' : 'Kosong'}</span>
                             </button>
                         </div>
@@ -1092,14 +1860,14 @@
                 return;
             }
             container.innerHTML = loanCart.map(c => `
-                <div class="px-3.5 py-2.5 flex justify-between items-center text-xs">
-                    <div>
-                        <span class="font-bold text-slate-800">${c.itemName}</span>
-                        <span class="text-[11px] font-mono text-slate-400 ml-1">(${c.itemId})</span>
+                <div class="px-3.5 py-2.5 flex justify-between items-center gap-2 text-xs">
+                    <div class="min-w-0">
+                        <span class="font-bold text-slate-800 block sm:inline truncate">${c.itemName}</span>
+                        <span class="text-[11px] font-mono text-slate-400 sm:ml-1">(${c.itemId})</span>
                     </div>
-                    <div class="flex items-center space-x-3">
+                    <div class="flex items-center space-x-2.5 shrink-0">
                         <span class="px-2 py-0.5 bg-indigo-50 text-indigo-700 font-bold rounded-md">${c.qty} unit</span>
-                        <button type="button" onclick="removeItemFromCart('${c.itemId}')" class="text-rose-500 hover:text-rose-700">
+                        <button type="button" onclick="removeItemFromCart('${c.itemId}')" class="p-1.5 text-rose-500 hover:text-rose-700 rounded-lg hover:bg-rose-50">
                             <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
                         </button>
                     </div>
@@ -1124,12 +1892,12 @@
             }
 
             dropdown.innerHTML = matches.map(u => `
-                <button type="button" onclick="selectUserFromAutocomplete('${u.nis}')" class="w-full text-left px-3.5 py-2 hover:bg-indigo-50 transition flex justify-between items-center text-xs">
-                    <div>
-                        <strong class="text-slate-900">${u.name}</strong>
-                        <span class="text-slate-400 ml-1">(${u.roleClass})</span>
+                <button type="button" onclick="selectUserFromAutocomplete('${u.nis}')" class="w-full min-h-[42px] text-left px-3.5 py-2.5 hover:bg-indigo-50 transition flex justify-between items-center gap-2 text-xs">
+                    <div class="min-w-0">
+                        <strong class="text-slate-900 truncate block sm:inline">${u.name}</strong>
+                        <span class="text-slate-400 sm:ml-1 text-[11px]">(${u.roleClass})</span>
                     </div>
-                    <span class="font-mono text-[11px] bg-slate-100 px-2 py-0.5 rounded text-slate-600">${u.nis}</span>
+                    <span class="font-mono text-[11px] bg-slate-100 px-2 py-0.5 rounded text-slate-600 shrink-0">${u.nis}</span>
                 </button>
             `).join('');
             dropdown.classList.remove('hidden');
@@ -1205,7 +1973,17 @@
                 users.push({ nis, name, roleClass, phone });
             }
 
-            const newLoan = {
+            // Validasi ulang ketersediaan stok terhadap jadwal booking pada rentang tanggal pinjam
+            for (const c of loanCart) {
+                const stRange = getStockBreakdown(c.itemId, loanDate, dueDate);
+                if (c.qty > stRange.available) {
+                    showToast(`Stok "${c.itemName}" terkunci jadwal praktikum pada tanggal tersebut (Sisa bebas: ${stRange.available})!`, 'error');
+                    return;
+                }
+            }
+
+            const session = getActiveSession();
+            pendingLoanPayload = {
                 id: 'TRX-' + Math.floor(1000 + Math.random() * 9000),
                 borrowerNis: nis,
                 borrowerName: name,
@@ -1216,14 +1994,407 @@
                 dueDate,
                 status: 'active',
                 returnDate: null,
-                notes: ''
+                notes: '',
+                officerName: session ? session.name : 'Petugas PLP Bengkel TI',
+                signatureData: null,
+                signedAt: null
             };
 
-            loans.unshift(newLoan);
+            closeModal('batchLoanModal');
+            openSignatureBastModal(pendingLoanPayload);
+        }
+
+        // =====================================================================
+        // ENGINE TANDA TANGAN DIGITAL (CANVAS) & BERITA ACARA SERAH TERIMA (PDF)
+        // =====================================================================
+        let sigDrawing = false;
+        let hasSignatureStroke = false;
+
+        function openSignatureBastModal(loanObj) {
+            const summaryEl = document.getElementById('sig-bast-summary');
+            const itemsList = loanObj.items.map(i => `<strong>${i.qty}x</strong> ${i.itemName}`).join(', ');
+            summaryEl.innerHTML = `
+                <div class="flex flex-wrap justify-between gap-1"><span class="text-slate-500">Nomor BAST / TRX:</span><strong class="font-mono text-indigo-700">${loanObj.id}</strong></div>
+                <div class="flex flex-wrap justify-between gap-1"><span class="text-slate-500">Peminjam:</span><strong>${loanObj.borrowerName} (${loanObj.borrowerNis})</strong></div>
+                <div class="flex flex-wrap justify-between gap-1"><span class="text-slate-500">Periode Pinjam:</span><strong>${formatDateIndo(loanObj.loanDate)} s/d ${formatDateIndo(loanObj.dueDate)}</strong></div>
+                <div class="pt-1.5 border-t border-slate-200"><span class="text-slate-500 block">Alat Diserahterimakan:</span><span class="text-slate-800">${itemsList}</span></div>
+            `;
+
+            openModal('signatureBastModal');
+            lucide.createIcons();
+            setTimeout(initSignatureCanvas, 80);
+        }
+
+        function initSignatureCanvas() {
+            const canvas = document.getElementById('signature-canvas');
+            if (!canvas) return;
+            const rect = canvas.getBoundingClientRect();
+            const dpr = window.devicePixelRatio || 1;
+            canvas.width = rect.width * dpr;
+            canvas.height = rect.height * dpr;
+
+            const ctx = canvas.getContext('2d');
+            ctx.scale(dpr, dpr);
+            ctx.lineWidth = 2.4;
+            ctx.lineCap = 'round';
+            ctx.lineJoin = 'round';
+            ctx.strokeStyle = '#0f172a';
+
+            sigDrawing = false;
+            hasSignatureStroke = false;
+            document.getElementById('sig-placeholder-text').classList.remove('hidden');
+
+            function getPos(evt) {
+                const r = canvas.getBoundingClientRect();
+                return { x: evt.clientX - r.left, y: evt.clientY - r.top };
+            }
+
+            canvas.onpointerdown = (e) => {
+                canvas.setPointerCapture(e.pointerId);
+                sigDrawing = true;
+                const pos = getPos(e);
+                ctx.beginPath();
+                ctx.moveTo(pos.x, pos.y);
+                document.getElementById('sig-placeholder-text').classList.add('hidden');
+            };
+
+            canvas.onpointermove = (e) => {
+                if (!sigDrawing) return;
+                const pos = getPos(e);
+                ctx.lineTo(pos.x, pos.y);
+                ctx.stroke();
+                hasSignatureStroke = true;
+            };
+
+            canvas.onpointerup = () => { sigDrawing = false; };
+            canvas.onpointercancel = () => { sigDrawing = false; };
+        }
+
+        function clearSignatureCanvas() {
+            const canvas = document.getElementById('signature-canvas');
+            if (!canvas) return;
+            const ctx = canvas.getContext('2d');
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            hasSignatureStroke = false;
+            document.getElementById('sig-placeholder-text').classList.remove('hidden');
+        }
+
+        function finalizeLoanWithSignature() {
+            if (!pendingLoanPayload) return;
+            if (!hasSignatureStroke) {
+                showToast('Peminjam wajib membubuhkan tanda tangan digital terlebih dahulu!', 'error');
+                return;
+            }
+
+            const canvas = document.getElementById('signature-canvas');
+            pendingLoanPayload.signatureData = canvas.toDataURL('image/png');
+            pendingLoanPayload.signedAt = new Date().toLocaleString('id-ID');
+
+            loans.unshift(pendingLoanPayload);
+            const savedId = pendingLoanPayload.id;
+            const borrowerName = pendingLoanPayload.borrowerName;
+            pendingLoanPayload = null;
+
             saveAllData();
             refreshUI();
-            closeModal('batchLoanModal');
-            showToast(`Berhasil mencatat peminjaman ${loanCart.length} jenis alat untuk ${name}!`);
+            closeModal('signatureBastModal');
+            showToast(`BAST Digital sah! Peminjaman ${borrowerName} berhasil dicatat.`);
+            openBastPreview(savedId);
+        }
+
+        function openBastPreview(loanId) {
+            const loan = loans.find(l => l.id === loanId);
+            if (!loan) return;
+            currentBastLoanId = loanId;
+
+            const docEl = document.getElementById('bast-document-content');
+            const rowsHtml = loan.items.map((it, idx) => `
+                <tr class="border-b border-slate-200">
+                    <td class="py-2 px-2 text-center">${idx + 1}</td>
+                    <td class="py-2 px-2 font-mono text-[11px] whitespace-nowrap">${it.itemId}</td>
+                    <td class="py-2 px-2 font-semibold">${it.itemName}</td>
+                    <td class="py-2 px-2 text-center font-bold whitespace-nowrap">${it.qty} Unit</td>
+                    <td class="py-2 px-2 text-center text-emerald-700 font-semibold whitespace-nowrap">Baik & Lengkap</td>
+                </tr>
+            `).join('');
+
+            const signatureBlock = loan.signatureData
+                ? `<img src="${loan.signatureData}" alt="Tanda Tangan Peminjam" class="h-16 mx-auto object-contain my-1">`
+                : `<div class="h-16 flex items-center justify-center text-[10px] text-slate-400 italic">[Tanda Tangan Terverifikasi Sistem]</div>`;
+
+            docEl.innerHTML = `
+                <div class="border-b-2 border-slate-900 pb-3 text-center">
+                    <h2 class="text-sm sm:text-base font-extrabold uppercase tracking-wide leading-snug">Berita Acara Serah Terima (BAST) Peminjaman Alat</h2>
+                    <p class="text-[11px] text-slate-600 font-semibold mt-0.5">Laboratorium & Bengkel Teknik Informatika — Sistem SIPAKAT</p>
+                    <p class="text-[11px] font-mono text-slate-500 mt-0.5">Nomor Dokumen: BAST/TI/${loan.id}</p>
+                </div>
+
+                <p class="leading-relaxed text-slate-700">
+                    Pada hari ini, tanggal <strong>${formatDateIndo(loan.loanDate)}</strong>, telah dilakukan serah terima peralatan praktikum Bengkel TI dengan rincian pihak sebagai berikut:
+                </p>
+
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 bg-slate-50 p-3 rounded-xl border border-slate-200">
+                    <div>
+                        <span class="text-[10px] font-bold uppercase text-slate-400 block">Pihak Pertama (Petugas PLP)</span>
+                        <strong class="text-slate-900 block">${loan.officerName || 'Budi Santoso, S.T.'}</strong>
+                        <span class="text-[11px] text-slate-600">Pengelola Inventaris Bengkel TI</span>
+                    </div>
+                    <div>
+                        <span class="text-[10px] font-bold uppercase text-slate-400 block">Pihak Kedua (Peminjam)</span>
+                        <strong class="text-slate-900 block">${loan.borrowerName}</strong>
+                        <span class="text-[11px] text-slate-600">NIS/NIP: ${loan.borrowerNis} • ${loan.borrowerClass}</span>
+                    </div>
+                </div>
+
+                <div class="overflow-x-auto border border-slate-200 rounded-xl">
+                    <table class="w-full text-left border-collapse min-w-[440px]">
+                        <thead>
+                            <tr class="bg-slate-100 border-b border-slate-300 text-[10px] sm:text-[11px] uppercase text-slate-700">
+                                <th class="py-2 px-2 text-center w-9">No</th>
+                                <th class="py-2 px-2">Kode QR</th>
+                                <th class="py-2 px-2">Nama Peralatan</th>
+                                <th class="py-2 px-2 text-center">Jumlah</th>
+                                <th class="py-2 px-2 text-center">Kondisi Awal</th>
+                            </tr>
+                        </thead>
+                        <tbody>${rowsHtml}</tbody>
+                    </table>
+                </div>
+
+                <div class="bg-amber-50/70 border border-amber-200 rounded-xl p-3 text-[11px] text-slate-700 space-y-1 leading-relaxed">
+                    <strong class="text-slate-900 block">Ketentuan & Pertanggungjawaban Administratif:</strong>
+                    <p>1. Pihak Kedua telah memeriksa fisik dan kelengkapan seluruh alat di atas dalam keadaan <strong>baik dan berfungsi normal</strong>.</p>
+                    <p>2. Pihak Kedua wajib mengembalikan seluruh alat selambat-lambatnya pada tanggal <strong>${formatDateIndo(loan.dueDate)}</strong>.</p>
+                    <p>3. Segala bentuk kerusakan akibat kelalaian pemakaian atau kehilangan menjadi tanggung jawab Pihak Kedua sesuai tata tertib Bengkel TI.</p>
+                </div>
+
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4 pt-2 text-center">
+                    <div class="border border-slate-200 rounded-xl p-3">
+                        <span class="text-[11px] text-slate-500 block">Menyerahkan,</span>
+                        <strong class="text-xs text-slate-800">Petugas PLP Bengkel TI</strong>
+                        <div class="h-16 flex flex-col items-center justify-center my-1">
+                            <span class="px-2.5 py-1 border-2 border-indigo-600 text-indigo-700 font-extrabold text-[10px] rounded uppercase tracking-wider">Verified Digital PLP</span>
+                        </div>
+                        <strong class="text-xs underline block">${loan.officerName || 'Budi Santoso, S.T.'}</strong>
+                    </div>
+                    <div class="border border-slate-200 rounded-xl p-3">
+                        <span class="text-[11px] text-slate-500 block">Menerima & Menyetujui,</span>
+                        <strong class="text-xs text-slate-800">Peminjam Alat</strong>
+                        ${signatureBlock}
+                        <strong class="text-xs underline block">${loan.borrowerName}</strong>
+                        <span class="text-[10px] text-slate-400 block">${loan.signedAt ? `Ditandatangani: ${loan.signedAt}` : `NIS/NIP: ${loan.borrowerNis}`}</span>
+                    </div>
+                </div>
+            `;
+
+            openModal('bastPreviewModal');
+            lucide.createIcons();
+        }
+
+        function printBastPdf() {
+            const content = document.getElementById('bast-document-content').innerHTML;
+            const printArea = document.getElementById('print-bast-area');
+            printArea.innerHTML = `<div class="p-6 max-w-2xl mx-auto font-sans text-xs space-y-4">${content}</div>`;
+            window.print();
+        }
+
+        function downloadBastHtmlFile() {
+            if (!currentBastLoanId) return;
+            const content = document.getElementById('bast-document-content').innerHTML;
+            const openDoc = '<' + '!DOCTYPE html><' + 'html lang="id"><' + 'head><' + 'meta charset="UTF-8"><' + 'title>BAST_' + currentBastLoanId + '<' + '/title><' + 'script src="https://cdn.tailwindcss.com"><' + '/script><' + '/head><' + 'body onload="window.print()" class="p-8 max-w-2xl mx-auto font-sans text-xs space-y-4">';
+            const closeDoc = '<' + '/body><' + '/html>';
+            const htmlDoc = openDoc + content + closeDoc;
+            const blob = new Blob([htmlDoc], { type: 'text/html;charset=utf-8' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `BAST_Digital_${currentBastLoanId}.html`;
+            a.click();
+            URL.revokeObjectURL(url);
+            showToast('Arsip BAST Digital berhasil diunduh!');
+        }
+
+        // =====================================================================
+        // MODUL JADWAL BLOK PEMAKAIAN BENGKEL / PRAKTIKUM KELAS (BOOKING)
+        // =====================================================================
+        function openBookingModal() {
+            bookingCart = [];
+            const session = getActiveSession();
+            document.getElementById('book-teacher').value = session && session.role.includes('Guru') ? session.name : '';
+            document.getElementById('book-class').value = '';
+            document.getElementById('book-subject').value = '';
+            document.getElementById('book-date').value = getRelativeDate(0);
+            document.getElementById('book-start-time').value = '08:00';
+            document.getElementById('book-end-time').value = '10:00';
+            populateBookingItemSelect();
+            renderBookingCart();
+            openModal('bookingModal');
+            lucide.createIcons();
+        }
+
+        function populateBookingItemSelect() {
+            const sel = document.getElementById('book-item-select');
+            const targetDate = document.getElementById('book-date').value || getRelativeDate(0);
+            sel.innerHTML = items.map(i => {
+                const st = getStockBreakdown(i.id, targetDate, targetDate);
+                return `<option value="${i.id}">[${i.id}] ${i.name} (Bebas di tgl ini: ${st.available})</option>`;
+            }).join('');
+        }
+
+        function addBookingItemToCart() {
+            const itemId = document.getElementById('book-item-select').value;
+            const qty = parseInt(document.getElementById('book-item-qty').value);
+            const targetDate = document.getElementById('book-date').value || getRelativeDate(0);
+
+            if (!itemId || isNaN(qty) || qty <= 0) {
+                showToast('Pilih alat dan jumlah unit praktikum!', 'error');
+                return;
+            }
+
+            const st = getStockBreakdown(itemId, targetDate, targetDate);
+            const existing = bookingCart.find(c => c.itemId === itemId);
+            const alreadyInCart = existing ? existing.qty : 0;
+
+            if (alreadyInCart + qty > st.available) {
+                showToast(`Stok tidak mencukupi pada tanggal tersebut! Maksimal bebas: ${st.available - alreadyInCart} unit.`, 'error');
+                return;
+            }
+
+            const itemObj = items.find(i => i.id === itemId);
+            if (existing) {
+                existing.qty += qty;
+            } else {
+                bookingCart.push({ itemId: itemObj.id, itemName: itemObj.name, qty });
+            }
+            renderBookingCart();
+        }
+
+        function removeBookingItemFromCart(itemId) {
+            bookingCart = bookingCart.filter(c => c.itemId !== itemId);
+            renderBookingCart();
+        }
+
+        function renderBookingCart() {
+            const el = document.getElementById('booking-cart-list');
+            if (bookingCart.length === 0) {
+                el.innerHTML = `<p class="text-xs text-slate-400 text-center py-3">Belum ada alat dipilih untuk jadwal ini.</p>`;
+                return;
+            }
+            el.innerHTML = bookingCart.map(c => `
+                <div class="px-3 py-2.5 flex justify-between items-center gap-2 text-xs">
+                    <span class="font-bold text-slate-800 truncate">${c.itemName}</span>
+                    <div class="flex items-center space-x-2 shrink-0">
+                        <span class="px-2 py-0.5 bg-indigo-50 text-indigo-700 font-bold rounded">${c.qty} unit</span>
+                        <button type="button" onclick="removeBookingItemFromCart('${c.itemId}')" class="p-1.5 text-rose-500 hover:text-rose-700 rounded-lg hover:bg-rose-50">
+                            <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+                        </button>
+                    </div>
+                </div>
+            `).join('');
+            lucide.createIcons();
+        }
+
+        function handleBookingSubmit(e) {
+            e.preventDefault();
+            if (bookingCart.length === 0) {
+                showToast('Tambahkan minimal 1 jenis alat yang akan dikunci untuk praktikum!', 'error');
+                return;
+            }
+
+            const teacherName = document.getElementById('book-teacher').value.trim();
+            const className = document.getElementById('book-class').value.trim();
+            const subject = document.getElementById('book-subject').value.trim();
+            const date = document.getElementById('book-date').value;
+            const startTime = document.getElementById('book-start-time').value;
+            const endTime = document.getElementById('book-end-time').value;
+            const isToday = (date === getRelativeDate(0));
+
+            const newBooking = {
+                id: 'BKG-' + Math.floor(100 + Math.random() * 900),
+                teacherName,
+                className,
+                subject,
+                date,
+                startTime,
+                endTime,
+                status: isToday ? 'active' : 'scheduled',
+                items: [...bookingCart]
+            };
+
+            bookings.unshift(newBooking);
+            saveAllData();
+            refreshUI();
+            closeModal('bookingModal');
+            switchTab('bookings');
+            showToast(`Jadwal Praktikum ${className} berhasil dikunci!`);
+        }
+
+        function renderBookings() {
+            const listEl = document.getElementById('bookings-list');
+            if (!listEl) return;
+
+            document.getElementById('bookings-header-count').textContent = `${bookings.length} jadwal tercatat`;
+
+            if (bookings.length === 0) {
+                listEl.innerHTML = `<div class="p-10 text-center text-xs text-slate-400">Belum ada jadwal praktikum kelas yang terdaftar.</div>`;
+                return;
+            }
+
+            listEl.innerHTML = bookings.map(b => {
+                const isDone = b.status === 'completed';
+                const isActive = b.status === 'active';
+                const badgeHtml = isDone
+                    ? `<span class="text-[10px] bg-slate-100 text-slate-600 font-bold px-2.5 py-0.5 rounded-full">SELESAI PRAKTIKUM</span>`
+                    : (isActive
+                        ? `<span class="text-[10px] bg-indigo-100 text-indigo-700 font-extrabold px-2.5 py-0.5 rounded-full">STOK TERKUNCI (AKTIF)</span>`
+                        : `<span class="text-[10px] bg-amber-100 text-amber-800 font-bold px-2.5 py-0.5 rounded-full">TERJADWAL (LOCKED)</span>`);
+
+                return `
+                <div class="p-4 sm:p-5 flex flex-col lg:flex-row justify-between items-stretch lg:items-center gap-3.5 sm:gap-4 ${isActive ? 'bg-indigo-50/30' : ''}">
+                    <div class="space-y-1.5">
+                        <div class="flex flex-wrap items-center gap-1.5 sm:gap-2">
+                            <span class="font-mono text-[11px] font-bold px-2 py-0.5 bg-slate-100 text-slate-600 rounded">${b.id}</span>
+                            <span class="font-bold text-slate-900 text-sm">Kelas ${b.className} — ${b.subject}</span>
+                            ${badgeHtml}
+                        </div>
+                        <p class="text-xs text-slate-600 leading-relaxed">
+                            Guru Pengampu: <strong>${b.teacherName}</strong> • Jadwal: <strong>${formatDateIndo(b.date)} (${b.startTime} – ${b.endTime} WIB)</strong>
+                        </p>
+                        <div class="flex flex-wrap gap-1.5 pt-0.5">
+                            ${b.items.map(i => `<span class="text-xs font-semibold px-2.5 py-1 bg-white text-indigo-700 rounded-lg border border-indigo-200">${i.qty}x ${i.itemName}</span>`).join('')}
+                        </div>
+                    </div>
+
+                    <div class="flex items-center gap-2 w-full lg:w-auto shrink-0 pt-2 lg:pt-0 border-t lg:border-t-0 border-slate-100">
+                        ${!isDone ? `
+                        <button onclick="completeBooking('${b.id}')" class="flex-1 lg:flex-none min-h-[40px] px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl transition shadow-sm flex items-center justify-center space-x-1.5">
+                            <i data-lucide="unlock" class="w-3.5 h-3.5 shrink-0"></i>
+                            <span>Selesai & Lepas Kunci</span>
+                        </button>` : ''}
+                        <button onclick="deleteBooking('${b.id}')" class="${isDone ? 'w-full lg:w-auto' : ''} min-h-[40px] min-w-[42px] px-3 py-2 bg-rose-50 hover:bg-rose-100 text-rose-600 text-xs font-bold rounded-xl transition flex items-center justify-center space-x-1" title="Hapus Jadwal">
+                            <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+                            ${isDone ? '<span class="lg:hidden">Hapus Jadwal</span>' : ''}
+                        </button>
+                    </div>
+                </div>`;
+            }).join('');
+        }
+
+        function completeBooking(bookingId) {
+            const idx = bookings.findIndex(b => b.id === bookingId);
+            if (idx !== -1) {
+                bookings[idx].status = 'completed';
+                saveAllData();
+                refreshUI();
+                showToast('Praktikum selesai! Kunci stok otomatis dilepaskan kembali ke rak.');
+            }
+        }
+
+        function deleteBooking(bookingId) {
+            bookings = bookings.filter(b => b.id !== bookingId);
+            saveAllData();
+            refreshUI();
+            showToast('Jadwal booking dihapus.');
         }
 
         // =====================================================================
@@ -1281,7 +2452,7 @@
                 );
             }
 
-            document.getElementById('loans-header-count').textContent = `${activeLoans.length} transaksi ditampilkan`;
+            document.getElementById('loans-header-count').textContent = `${activeLoans.length} transaksi`;
 
             if (activeLoans.length === 0) {
                 container.innerHTML = `
@@ -1302,9 +2473,9 @@
                 const waUrl = loan.borrowerPhone ? `https://wa.me/${loan.borrowerPhone}?text=${waText}` : '#';
 
                 return `
-                <div class="p-4 sm:p-5 flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 ${isOverdue ? 'bg-rose-50/40' : ''}">
+                <div class="p-4 sm:p-5 flex flex-col lg:flex-row justify-between items-stretch lg:items-center gap-3.5 sm:gap-4 ${isOverdue ? 'bg-rose-50/40' : ''}">
                     <div class="space-y-1.5">
-                        <div class="flex flex-wrap items-center gap-2">
+                        <div class="flex flex-wrap items-center gap-1.5 sm:gap-2">
                             <span class="font-mono text-[11px] font-bold px-2 py-0.5 bg-slate-100 text-slate-600 rounded">${loan.id}</span>
                             <span class="font-bold text-slate-900 text-sm">${loan.borrowerName}</span>
                             <span class="text-xs text-slate-500">(${loan.borrowerNis} • ${loan.borrowerClass})</span>
@@ -1321,18 +2492,23 @@
                         </p>
                     </div>
 
-                    <div class="flex flex-wrap items-center gap-2 w-full lg:w-auto justify-end shrink-0">
+                    <!-- Mobile-First: Matriks Tombol 2x2 Simetris di HP, Horizontal di Tablet/Desktop -->
+                    <div class="grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-2 w-full lg:w-auto sm:justify-end shrink-0 pt-2 lg:pt-0 border-t lg:border-t-0 border-slate-100">
+                        <button onclick="openBastPreview('${loan.id}')" class="min-h-[40px] px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-bold rounded-xl transition flex items-center justify-center space-x-1.5" title="Lihat & Cetak Berita Acara Serah Terima">
+                            <i data-lucide="file-signature" class="w-3.5 h-3.5 text-indigo-600 shrink-0"></i>
+                            <span>BAST / PDF</span>
+                        </button>
                         ${loan.borrowerPhone ? `
-                        <a href="${waUrl}" target="_blank" onclick="showToast('Membuka WhatsApp untuk ${loan.borrowerName}...')" class="px-3 py-2 bg-white border border-slate-200 hover:bg-emerald-50 hover:border-emerald-200 text-slate-700 text-xs font-bold rounded-xl transition flex items-center space-x-1.5">
-                            <i data-lucide="message-circle" class="w-3.5 h-3.5 text-emerald-600"></i>
+                        <a href="${waUrl}" target="_blank" onclick="showToast('Membuka WhatsApp untuk ${loan.borrowerName}...')" class="min-h-[40px] px-3 py-2 bg-white border border-slate-200 hover:bg-emerald-50 hover:border-emerald-200 text-slate-700 text-xs font-bold rounded-xl transition flex items-center justify-center space-x-1.5">
+                            <i data-lucide="message-circle" class="w-3.5 h-3.5 text-emerald-600 shrink-0"></i>
                             <span>Ingatkan WA</span>
                         </a>` : ''}
-                        <button onclick="openExtendModal('${loan.id}')" class="px-3 py-2 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 text-xs font-bold rounded-xl transition flex items-center space-x-1">
-                            <i data-lucide="calendar-plus" class="w-3.5 h-3.5"></i>
+                        <button onclick="openExtendModal('${loan.id}')" class="min-h-[40px] px-3 py-2 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 text-xs font-bold rounded-xl transition flex items-center justify-center space-x-1.5">
+                            <i data-lucide="calendar-plus" class="w-3.5 h-3.5 shrink-0"></i>
                             <span>Perpanjang</span>
                         </button>
-                        <button onclick="openReturnChecklistModal('${loan.id}')" class="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl transition shadow-sm flex items-center space-x-1">
-                            <i data-lucide="check-square" class="w-3.5 h-3.5"></i>
+                        <button onclick="openReturnChecklistModal('${loan.id}')" class="min-h-[40px] px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl transition shadow-sm flex items-center justify-center space-x-1.5">
+                            <i data-lucide="check-square" class="w-3.5 h-3.5 shrink-0"></i>
                             <span>Kembalikan</span>
                         </button>
                     </div>
@@ -1376,11 +2552,11 @@
             document.getElementById('return-loan-id').value = loan.id;
             document.getElementById('return-notes').value = '';
             document.getElementById('return-modal-header').innerHTML = `
-                <div class="flex justify-between">
+                <div class="flex flex-wrap justify-between gap-1">
                     <span class="text-slate-500">Kode Transaksi:</span>
                     <strong class="font-mono text-slate-900">${loan.id}</strong>
                 </div>
-                <div class="flex justify-between">
+                <div class="flex flex-wrap justify-between gap-1">
                     <span class="text-slate-500">Peminjam:</span>
                     <strong class="text-slate-900">${loan.borrowerName} (${loan.borrowerNis})</strong>
                 </div>
@@ -1389,13 +2565,13 @@
             const listEl = document.getElementById('return-items-checklist');
             listEl.innerHTML = loan.items.map((li, index) => `
                 <div class="p-3 bg-slate-50 rounded-xl border border-slate-200 space-y-2">
-                    <div class="flex justify-between items-center text-xs">
+                    <div class="flex justify-between items-center gap-2 text-xs">
                         <strong class="text-slate-900">${li.itemName}</strong>
-                        <span class="px-2 py-0.5 bg-indigo-100 text-indigo-700 font-bold rounded">${li.qty} unit</span>
+                        <span class="px-2 py-0.5 bg-indigo-100 text-indigo-700 font-bold rounded shrink-0">${li.qty} unit</span>
                     </div>
                     <div>
                         <label class="block text-[11px] font-semibold text-slate-600 mb-1">Kondisi Fisik Saat Kembali *</label>
-                        <select id="return-cond-${index}" required class="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-indigo-600">
+                        <select id="return-cond-${index}" required class="w-full min-h-[40px] px-3 py-2 bg-white border border-slate-300 rounded-lg text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-indigo-600">
                             <option value="Normal (Baik)">Normal (Baik) — Kembali ke rak tersedia</option>
                             <option value="Rusak Ringan / Perlu Perbaikan">Rusak / Maintenance — Masuk karantina perbaikan</option>
                             <option value="Hilang">Hilang — Masuk catatan kehilangan/karantina</option>
@@ -1447,7 +2623,7 @@
         }
 
         // =====================================================================
-        // TAB 3: RIWAYAT SELESAI & MANAJEMEN PERBAIKAN ALAT RUSAK
+        // TAB 4: RIWAYAT SELESAI & MANAJEMEN PERBAIKAN ALAT RUSAK
         // =====================================================================
         function renderHistoryAndMaintenance() {
             // 1. Render Alat Rusak / Maintenance
@@ -1460,16 +2636,16 @@
                 maintList.innerHTML = `<p class="p-6 text-center text-xs text-slate-400">Tidak ada alat yang rusak atau dalam perbaikan saat ini.</p>`;
             } else {
                 maintList.innerHTML = damagedItems.map(item => `
-                    <div class="p-4 sm:px-5 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+                    <div class="p-4 sm:px-5 flex flex-col sm:flex-row justify-between items-stretch sm:items-center gap-3">
                         <div>
-                            <div class="flex items-center space-x-2">
+                            <div class="flex flex-wrap items-center gap-1.5">
                                 <span class="font-mono text-[11px] font-bold bg-slate-100 px-2 py-0.5 rounded text-slate-600">${item.id}</span>
                                 <strong class="text-sm text-slate-900">${item.name}</strong>
                             </div>
                             <p class="text-xs text-rose-600 font-semibold mt-1">${item.damagedStock} unit sedang dikarantina (tidak tersedia untuk dipinjam)</p>
                         </div>
-                        <button onclick="repairOneUnit('${item.id}')" class="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl transition shadow-sm flex items-center space-x-1.5">
-                            <i data-lucide="check-circle" class="w-3.5 h-3.5"></i>
+                        <button onclick="repairOneUnit('${item.id}')" class="w-full sm:w-auto min-h-[40px] px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl transition shadow-sm flex items-center justify-center space-x-1.5 shrink-0">
+                            <i data-lucide="check-circle" class="w-3.5 h-3.5 shrink-0"></i>
                             <span>Selesai Perbaikan (1 Unit)</span>
                         </button>
                     </div>
@@ -1484,9 +2660,9 @@
                 histList.innerHTML = `<p class="p-6 text-center text-xs text-slate-400">Belum ada riwayat transaksi yang selesai.</p>`;
             } else {
                 histList.innerHTML = completed.map(loan => `
-                    <div class="p-4 sm:px-5 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
-                        <div class="space-y-1">
-                            <div class="flex items-center space-x-2">
+                    <div class="p-4 sm:px-5 flex flex-col sm:flex-row justify-between items-stretch sm:items-center gap-3">
+                        <div class="space-y-1.5">
+                            <div class="flex flex-wrap items-center gap-1.5">
                                 <span class="font-mono text-[11px] font-bold text-slate-500">${loan.id}</span>
                                 <strong class="text-sm text-slate-900">${loan.borrowerName}</strong>
                                 <span class="text-xs text-slate-400">(${loan.borrowerNis})</span>
@@ -1499,7 +2675,13 @@
                             </div>
                             <p class="text-[11px] text-slate-400">Dikembalikan: ${formatDateIndo(loan.returnDate)} ${loan.notes ? `• Catatan: "${loan.notes}"` : ''}</p>
                         </div>
-                        <span class="px-2.5 py-1 bg-slate-100 text-slate-600 text-[10px] font-bold rounded-full uppercase">Selesai</span>
+                        <div class="flex items-center justify-between sm:justify-end space-x-2 shrink-0 pt-2 sm:pt-0 border-t sm:border-t-0 border-slate-100">
+                            <button onclick="openBastPreview('${loan.id}')" class="min-h-[36px] px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl transition flex items-center space-x-1.5">
+                                <i data-lucide="file-signature" class="w-3.5 h-3.5 text-indigo-600"></i>
+                                <span>Lihat BAST</span>
+                            </button>
+                            <span class="px-2.5 py-1 bg-slate-100 text-slate-600 text-[10px] font-bold rounded-full uppercase">Selesai</span>
+                        </div>
                     </div>
                 `).join('');
             }
@@ -1558,12 +2740,12 @@
                 activeListEl.innerHTML = `<p class="text-slate-400 text-center py-2">Tidak ada peminjam aktif untuk alat ini.</p>`;
             } else {
                 activeListEl.innerHTML = activeForItem.map(a => `
-                    <div class="bg-white p-2 rounded-lg border border-slate-200 flex justify-between items-center">
-                        <div>
-                            <strong class="text-slate-900">${a.borrowerName}</strong> <span class="text-slate-400">(${a.borrowerNis})</span>
+                    <div class="bg-white p-2.5 rounded-lg border border-slate-200 flex justify-between items-center gap-2">
+                        <div class="min-w-0">
+                            <strong class="text-slate-900 truncate block sm:inline">${a.borrowerName}</strong> <span class="text-slate-400">(${a.borrowerNis})</span>
                             <span class="block text-[10px] text-slate-500">Batas kembali: ${formatDateIndo(a.dueDate)}</span>
                         </div>
-                        <span class="px-2 py-0.5 bg-amber-100 text-amber-800 font-bold rounded text-[10px]">${a.qty} unit</span>
+                        <span class="px-2 py-0.5 bg-amber-100 text-amber-800 font-bold rounded text-[10px] shrink-0">${a.qty} unit</span>
                     </div>
                 `).join('');
             }
@@ -1583,12 +2765,12 @@
                 auditEl.innerHTML = `<p class="text-slate-400 text-center py-2">Belum ada riwayat penggunaan sebelumnya.</p>`;
             } else {
                 auditEl.innerHTML = historyForItem.map(h => `
-                    <div class="bg-white p-2 rounded-lg border border-slate-200 flex justify-between items-center">
-                        <div>
-                            <strong class="text-slate-800">${h.borrowerName}</strong> • <span class="text-slate-500">${formatDateIndo(h.returnDate)}</span>
+                    <div class="bg-white p-2.5 rounded-lg border border-slate-200 flex justify-between items-center gap-2">
+                        <div class="min-w-0">
+                            <strong class="text-slate-800 truncate block sm:inline">${h.borrowerName}</strong> <span class="text-slate-500">• ${formatDateIndo(h.returnDate)}</span>
                             <span class="block text-[10px] text-slate-500">Kondisi Kembali: <strong>${h.cond}</strong></span>
                         </div>
-                        <span class="text-[10px] font-mono text-slate-400">${h.id}</span>
+                        <span class="text-[10px] font-mono text-slate-400 shrink-0">${h.id}</span>
                     </div>
                 `).join('');
             }
@@ -1722,7 +2904,8 @@
                 app: 'SIPAKAT-Bengkel-TI',
                 items,
                 users,
-                loans
+                loans,
+                bookings
             };
             const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
             const url = URL.createObjectURL(blob);
@@ -1745,6 +2928,7 @@
                         items = data.items;
                         users = data.users;
                         loans = data.loans;
+                        if (Array.isArray(data.bookings)) bookings = data.bookings;
                         saveAllData();
                         refreshUI();
                         closeModal('backupModal');
@@ -1764,29 +2948,38 @@
             localStorage.removeItem(KEY_ITEMS);
             localStorage.removeItem(KEY_USERS);
             localStorage.removeItem(KEY_LOANS);
+            localStorage.removeItem(KEY_BOOKINGS);
             initApp();
             closeModal('resetModal');
             showToast('Seluruh data demo berhasil dikembalikan ke kondisi awal!');
         }
 
         // =====================================================================
-        // UI HELPERS (TABS, MODALS, TOAST)
+        // UI HELPERS (TABS DESKTOP & MOBILE BOTTOM NAV, MODALS, TOAST)
         // =====================================================================
         function switchTab(tabName) {
-            ['inventory', 'loans', 'history'].forEach(t => {
+            closeMobileUtilityMenu();
+            ['inventory', 'loans', 'bookings', 'history'].forEach(t => {
                 const btn = document.getElementById(`tab-${t}`);
+                const mobBtn = document.getElementById(`mob-tab-${t}`);
                 const sec = document.getElementById(`section-${t}`);
+                if (!sec) return;
+
                 if (t === tabName) {
-                    btn.className = "pb-3 text-sm font-bold border-b-2 border-indigo-600 text-indigo-600 whitespace-nowrap transition flex items-center space-x-2";
+                    if (btn) btn.className = "pb-3 text-sm font-bold border-b-2 border-indigo-600 text-indigo-600 whitespace-nowrap transition flex items-center space-x-2";
+                    if (mobBtn) mobBtn.className = "relative flex flex-col items-center justify-center space-y-1 text-indigo-600 font-bold transition";
                     sec.classList.remove('hidden');
                 } else {
-                    btn.className = "pb-3 text-sm font-semibold border-b-2 border-transparent text-slate-500 hover:text-slate-900 whitespace-nowrap transition flex items-center space-x-2";
+                    if (btn) btn.className = "pb-3 text-sm font-semibold border-b-2 border-transparent text-slate-500 hover:text-slate-900 whitespace-nowrap transition flex items-center space-x-2";
+                    if (mobBtn) mobBtn.className = "relative flex flex-col items-center justify-center space-y-1 text-slate-500 font-semibold transition";
                     sec.classList.add('hidden');
                 }
             });
+            lucide.createIcons();
         }
 
         function openModal(id) {
+            closeMobileUtilityMenu();
             document.getElementById(id).classList.remove('hidden');
         }
 
@@ -1804,13 +2997,28 @@
             icon.className = type === 'error' ? 'w-4 h-4 text-rose-400 shrink-0' : 'w-4 h-4 text-emerald-400 shrink-0';
             lucide.createIcons();
 
-            toast.classList.remove('translate-y-24', 'opacity-0');
+            toast.classList.remove('translate-y-28', 'opacity-0');
             setTimeout(() => {
-                toast.classList.add('translate-y-24', 'opacity-0');
+                toast.classList.add('translate-y-28', 'opacity-0');
             }, 3400);
         }
 
-        window.onload = initApp;
+        // Boot Aplikasi dengan Cek Keamanan Sesi Login Terlebih Dahulu
+        window.onload = async function() {
+            try {
+                await initAuthAccounts();
+                checkLoginLockoutStatus();
+                const activeSession = getActiveSession();
+                if (activeSession) {
+                    enterAuthenticatedApp(activeSession);
+                } else {
+                    lucide.createIcons();
+                }
+            } catch (err) {
+                console.error('Initialization error:', err);
+                lucide.createIcons();
+            }
+        };
     </script>
 </body>
 </html>
